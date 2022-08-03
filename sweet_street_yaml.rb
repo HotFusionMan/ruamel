@@ -3,4 +3,6 @@
 require 'lib/'
 require 'numeric_extensions'
 
-using NumericExtensions
+module SweetStreetYaml
+  using NumericExtensions
+end

@@ -30,17 +30,38 @@
 require 'error'
 require 'tokens'
 require 'compat'
-require 'numeric_extensions'
 
-module Ruamel
-  using NumericExtensions
-
+module SweetStreetYaml
   class Scanner
-    _THE_END = "\n\0\r\x85\u2028\u2029"
-    _THE_END_SPACE_TAB = " \n\0\t\r\x85\u2028\u2029"
-    _SPACE_TAB = " \t"
-
-
+    THE_END = "\n\0\r\x85\u2028\u2029"
+    THE_END_SPACE_TAB = " \n\0\t\r\x85\u2028\u2029"
+    SPACE_TAB = " \t"
+    DIGITS = '0'..'9'.to_a.freeze
+    UPPERCASE_LETTERS = 'A'..'Z'.to_a.freeze
+    LOWERCASE_LETTERS = 'a'..'z'.to_a.freeze
+    ALPHANUMERIC_CHARACTERS = (DIGITS + UPPERCASE_LETTERS + LOWERCASE_LETTERS).freeze
+    ESCAPE_REPLACEMENTS = {
+      '0' => "\0",
+      'a' => "\x07",
+      'b' => "\x08",
+      't' => "\x09",
+      "\t" => "\x09",
+      'n' => "\x0A",
+      'v' => "\x0B",
+      'f' => "\x0C",
+      'r' => "\x0D",
+      'e' => "\x1B",
+      ' ' => "\x20",
+      '"' => '"',
+      '/' => '/',  # as per http://www.json.org/
+      '\\' => '\\',
+      'N' => "\x85",
+      '_' => "\xA0",
+      'L' => "\u2028",
+      'P' => "\u2029"
+    }.freeze
+    ESCAPE_CODES = { 'x' => 2, 'u' => 4, 'U' => 8 }.freeze
+    
     def initialize(loader = nil)
       # It is assumed that Scanner and Reader will have a common descendant.
       # Reader do the dirty work of checking for BOM and converting the
@@ -434,7 +455,7 @@ module Ruamel
       @allow_simple_key = false
 
       # Scan and add DIRECTIVE.
-      tokens.append(scan_directive)
+      @tokens.append(scan_directive)
     end
 
     def fetch_document_start
@@ -549,6 +570,1908 @@ module Ruamel
       @tokens.append(BlockEntryToken.new(start_mark, end_mark))
     end
 
-    d
+    def fetch_key
+      # Block context needs additional checks.
+      if not self.flow_level:
+
+        # Are we allowed to start a key (not nessesary a simple)?
+        raise ScannerError.new(nil, nil, 'mapping keys are not allowed here', reader.get_mark) unless @allow_simple_key
+
+        # We may need to add BLOCK-MAPPING-START.
+        if add_indent(reader.column)
+          mark = reader.get_mark
+          @tokens.append(BlockMappingStartToken.new(mark, mark))
+        end
+      end
+
+      # Simple keys are allowed after '?' in the block context.
+      @allow_simple_key = !(flow_level.to_boolean)
+
+      # Reset possible simple key on the current level.
+      remove_possible_simple_key
+
+      # Add KEY.
+      start_mark = reader.get_mark
+      reader.forward
+      end_mark = reader.get_mark
+      @tokens.append(KeyToken.new(start_mark, end_mark))
+    end
+
+    def fetch_value
+      flow_level_as_boolean = flow_level.to_boolean
+
+      # Do we determine a simple key?
+      if @possible_simple_keys.include?(flow_level)
+        # Add KEY.
+        key = @possible_simple_keys.delete(flow_level)
+        @tokens.insert(key.token_number - @tokens_taken, KeyToken.new(key.mark, key.mark))
+
+        # If this key starts a new block mapping, we need to add
+        # BLOCK-MAPPING-START.
+        unless flow_level_as_boolean
+          if add_indent(key.column)
+            @tokens.insert(
+              key.token_number - @tokens_taken,
+              BlockMappingStartToken.new(key.mark, key.mark),
+              )
+          end
+        end
+        # There cannot be two simple keys one after another.
+        @allow_simple_key = false
+      else
+        # It must be a part of a complex key.
+
+        # Block context needs additional checks.
+        # (Do we really need them? They will be caught by the parser
+        # anyway.)
+        unless flow_level_as_boolean
+
+          # We are allowed to start a complex value if and only if
+          # we can start a simple key.
+          unless @allow_simple_key
+            raise ScannerError.new(
+              nil,
+              nil,
+              'mapping values are not allowed here',
+              reader.get_mark
+            )
+          end
+        end
+
+        # If this value starts a new block mapping, we need to add
+        # BLOCK-MAPPING-START.  It will be detected as an error later by
+        # the parser.
+        unless flow_level_as_boolean
+          if add_indent(reader.column)
+            mark = reader.get_mark
+            @tokens.append(BlockMappingStartToken,new(mark, mark))
+          end
+        end
+
+        # Simple keys are allowed after ':' in the block context.
+        @allow_simple_key = !(flow_level_as_boolean)
+
+        # Reset possible simple key on the current level.
+        remove_possible_simple_key
+      end
+
+      # Add VALUE.
+      start_mark = reader.get_mark
+      reader.forward
+      end_mark = reader.get_mark
+      @tokens.append(ValueToken.new(start_mark, end_mark))
+    end
+
+    def fetch_alias
+      # ALIAS could be a simple key.
+      save_possible_simple_key
+      # No simple keys after ALIAS.
+      @allow_simple_key = false
+      # Scan and add ALIAS.
+      @tokens.append(scan_anchor(AliasToken))
+    end
+
+    def fetch_anchor
+      # ANCHOR could start a simple key.
+      save_possible_simple_key
+      # No simple keys after ANCHOR.
+      @allow_simple_key = false
+      # Scan and add ANCHOR.
+      @tokens.append(scan_anchor(AnchorToken))
+    end
+
+    def fetch_tag
+      # TAG could start a simple key.
+      save_possible_simple_key
+      # No simple keys after TAG.
+      @allow_simple_key = false
+      # Scan and add TAG.
+      @tokens.append(scan_tag())
+    end
+
+    def fetch_literal
+      fetch_block_scalar('|')
+    end
+
+    def fetch_folded
+      fetch_block_scalar('>')
+    end
+
+    def fetch_block_scalar(style)
+      # A simple key may follow a block scalar.
+      @allow_simple_key = true
+      # Reset possible simple key on the current level.
+      remove_possible_simple_key
+      # Scan and add SCALAR.
+      @tokens.append(scan_block_scalar(style))
+    end
+
+    def fetch_single
+      fetch_flow_scalar("'")
+    end
+
+    def fetch_double
+      fetch_flow_scalar('"')
+    end
+
+    def fetch_flow_scalar(style)
+      # A flow scalar could be a simple key.
+      save_possible_simple_key
+      # No simple keys after flow scalars.
+      @allow_simple_key = false
+      # Scan and add SCALAR.
+      @tokens.append(scan_flow_scalar(style))
+    end
+
+    def fetch_plain
+      # A plain scalar could be a simple key.
+      save_possible_simple_key
+      # No simple keys after plain scalars. But note that `scan_plain` will
+      # change this flag if the scan is finished at the beginning of the
+      # line.
+      @allow_simple_key = false
+      # Scan and add SCALAR. May change `allow_simple_key`.
+      @tokens.append(scan_plain)
+    end
+
+    # Checkers
+
+    def check_directive
+        # DIRECTIVE:        ^ '%' ...
+        # The '%' indicator is already checked.
+      reader.column == 0
+    end
+
+    def check_document_start
+      # DOCUMENT-START:   ^ '---' (' '|'\n')
+      reader.column == 0 && reader.prefix(3) == '---' && THE_END_SPACE_TAB.include?(reader.peek(3))
+    end
+
+    def check_document_end
+      # DOCUMENT-END:     ^ '...' (' '|'\n')
+      reader.column == 0 && reader.prefix(3) == '...' && THE_END_SPACE_TAB.include?(reader.peek(3))
+    end
+
+    def check_block_entry
+      # BLOCK-ENTRY:      '-' (' '|'\n')
+      THE_END_SPACE_TAB.include?(reader.peek(1))
+    end
+
+    def check_key
+      # KEY(flow context):    '?'
+      return true if flow_level.to_boolean
+
+      # KEY(block context):   '?' (' '|'\n')
+      THE_END_SPACE_TAB.include?(reader.peek(1))
+    end
+
+    def check_value
+      # VALUE(flow context):  ':'
+      if scanner_processing_version == [1, 1]
+        return true if flow_level.to_boolean
+      else
+        @peek_is_in_THE_END_SPACE_TAB = THE_END_SPACE_TAB.include?(reader.peek(1))
+        if flow_level.to_boolean
+          if @flow_context[-1] == '['
+            return false unless @peek_is_in_THE_END_SPACE_TAB
+          elsif @tokens && @tokens[-1].instance_of?(ValueToken)
+            # mapping flow context scanning a value token
+            return false unless @peek_is_in_THE_END_SPACE_TAB
+          end
+
+          return true
+          # VALUE(block context): ':' (' '|'\n')
+        end
+      end
+
+      @peek_is_in_THE_END_SPACE_TAB
+    end
+
+    def check_plain
+      # A plain scalar may start with any non-space character except
+      #   '-', '?', ':', ',', '[', ']', '{', '}',
+      #   '#', '&', '*', '!', '|', '>', '\'', '\"',
+      #   '%', '@', '`'.
+      #
+      # It may also start with
+      #   '-', '?', ':'
+      # if it is followed by a non-space character.
+      #
+      # Note that we limit the last rule to the block context (except the
+      # '-' character) because we want the flow context to be space
+      # independent.
+      ch = reader.peek
+      if scanner_processing_version == [1, 1]
+        return !("\0 \t\r\n\x85\u2028\u2029-?:,[]{}#&*!|>'\"%@`".include?(ch)) ||
+          (!THE_END_SPACE_TAB.include?(reader.peek(1))
+          && (ch == '-' || (!flow_level && '?:'.include?(ch)))
+          )
+      end
+      # YAML 1.2
+      return true unless ("\0 \t\r\n\x85\u2028\u2029-?:,[]{}#&*!|>'\"%@`".include?(ch))
+      # ###################                           ^ ???
+      ch1 = reader.peek(1)
+      return true if ch == '-' && !THE_END_SPACE_TAB.include?(ch1)
+      return true if ch == ':' && flow_level.to_boolean && !SPACE_TAB.include?(ch1)
+
+      return !THE_END_SPACE_TAB.include?(reader.peek(1)) &&
+        (ch == '-' || (!flow_level && '?:'.include?(ch)))
+    end
+
+    # Scanners.
+
+    def scan_to_next_token
+      # We ignore spaces, line breaks and comments.
+      # If we find a line break in the block context, we set the flag
+      # `allow_simple_key` on.
+      # The byte order mark is stripped if it's the first character in the
+      # stream. We do not yet support BOM inside the stream as the
+      # specification requires. Any such mark will be considered as a part
+      # of the document.
+      #
+      # TODO: We need to make tab handling rules more sane. A good rule is
+      #   Tabs cannot precede tokens
+      #   BLOCK-SEQUENCE-START, BLOCK-MAPPING-START, BLOCK-END,
+      #   KEY(block), VALUE(block), BLOCK-ENTRY
+      # So the checking code is
+      #   if <TAB>
+      #       @allow_simple_keys = false
+      # We also need to add the check for `allow_simple_keys == true` to
+      # `unwind_indent` before issuing BLOCK-END.
+      # Scanners for block, flow, and plain scalars need to be modified.
+      reader.forward if reader.index == 0 && reader.peek == "\uFEFF"
+      found = false
+      until found
+        while reader.peek == ' '
+          reader.forward
+        end
+        if reader.peek == '#'
+          until THE_END.include?(reader.peek)
+            reader.forward
+          end
+        end
+        if scan_line_break
+          @allow_simple_key = true unless flow_level > 0
+        else
+          found = true
+        end
+      end
+      nil
+    end
+
+    def scan_directive
+      # See the specification for details.
+      start_mark = reader.get_mark
+      reader.forward
+      name = scan_directive_name(start_mark)
+      value = nil
+      case name
+      when 'YAML'
+        value = scan_yaml_directive_value(start_mark)
+        end_mark = reader.get_mark
+      when 'TAG'
+        value = scan_tag_directive_value(start_mark)
+        end_mark = reader.get_mark
+      else
+        end_mark = reader.get_mark
+        until THE_END.include?(reader.peek)
+          reader.forward
+        end
+      end
+      scan_directive_ignored_line(start_mark)
+      return DirectiveToken.new(name, value, start_mark, end_mark)
+    end
+
+    def scan_directive_name(start_mark)
+      # See the specification for details.
+      length = 0
+      ch = reader.peek(length)
+      while ALPHANUMERIC_CHARACTERS.include?(ch) || '-_:.'.include?(ch)
+        length += 1
+        ch = reader.peek(length)
+      end
+      unless length.to_boolean
+        raise ScannerError.new(
+          'while scanning a directive',
+          start_mark,
+          _F('expected alphabetic or numeric character, but found {ch!r}', ch=ch),
+          reader.get_mark,
+          )
+      end
+      value = reader.prefix(length)
+      reader.forward(length)
+      ch = reader.peek
+      unless "\0 \r\n\x85\u2028\u2029".include?(ch)
+        raise ScannerError.new(
+          'while scanning a directive',
+          start_mark,
+          _F('expected alphabetic or numeric character, but found {ch!r}', ch=ch),
+          reader.get_mark,
+          )
+      end
+      value
+    end
+
+    def scan_yaml_directive_value(start_mark)
+      # See the specification for details.
+      while reader.peek == ' '
+        reader.forward
+      end
+      major = scan_yaml_directive_number(start_mark)
+      unless reader.peek == '.'
+        raise ScannerError.new(
+          'while scanning a directive',
+          start_mark,
+          _F("expected a digit or '.', but found {srp_call!r}", srp_call=reader.peek),
+          reader.get_mark,
+          )
+      end
+      reader.forward
+      minor = scan_yaml_directive_number(start_mark)
+      unless "\0 \r\n\x85\u2028\u2029".include?(reader.peek)
+        raise ScannerError.new(
+          'while scanning a directive',
+          start_mark,
+          _F("expected a digit or '.', but found {srp_call!r}", srp_call=reader.peek),
+          reader.get_mark,
+          )
+      end
+      # yaml_version =
+      [major, minor]
+    end
+
+    def scan_yaml_directive_number(start_mark)
+      # See the specification for details.
+      ch = reader.peek
+      unless DIGITS.include?(ch)
+        raise ScannerError.new(
+          'while scanning a directive',
+          start_mark,
+          _F('expected a digit, but found {ch!r}', ch=ch),
+          reader.get_mark,
+          )
+      end
+      length = 0
+      while DIGITS.include?(reader.peek(length))
+        length += 1
+      end
+      value = (reader.prefix(length)).to_i
+      reader.forward(length)
+      value
+    end
+
+    def scan_tag_directive_value(start_mark)
+      # See the specification for details.
+      while reader.peek == ' '
+        reader.forward
+      end
+      handle = scan_tag_directive_handle(start_mark)
+      while reader.peek == ' '
+        reader.forward
+      end
+      prefix = scan_tag_directive_prefix(start_mark)
+      [handle, prefix]
+    end
+
+    def scan_tag_directive_handle(start_mark)
+      # See the specification for details.
+      value = scan_tag_handle('directive', start_mark)
+      ch = reader.peek
+      unless ch == ' '
+        raise ScannerError.new(
+          'while scanning a directive',
+          start_mark,
+          _F("expected ' ', but found {ch!r}", ch=ch),
+          reader.get_mark,
+          )
+      end
+      value
+    end
+
+    def scan_tag_directive_prefix(start_mark)
+      # See the specification for details.
+      value = scan_tag_uri('directive', start_mark)
+      ch = reader.peek
+      unless "\0 \r\n\x85\u2028\u2029".include?(ch)
+        raise ScannerError.new(
+          'while scanning a directive',
+          start_mark,
+          _F("expected ' ', but found {ch!r}", ch=ch),
+          reader.get_mark,
+          )
+      end
+      value
+    end
+
+    def scan_directive_ignored_line(start_mark)
+      # See the specification for details.
+      while reader.peek == ' '
+        reader.forward
+      end
+      if reader.peek == '#'
+        until THE_END.include?(reader.peek)
+          reader.forward
+        end
+      end
+      ch = reader.peek
+      unless THE_END.include?(ch)
+        raise ScannerError.new(
+          'while scanning a directive',
+          start_mark,
+          _F('expected a comment or a line break, but found {ch!r}', ch=ch),
+          reader.get_mark,
+          )
+      end
+      scan_line_break
+    end
+
+    def scan_anchor(token_class)
+      # The specification does not restrict characters for anchors and
+      # aliases. This may lead to problems, for instance, the document
+      #   [ *alias, value ]
+      # can be interpteted in two ways, as
+      #   [ "value" ]
+      # and
+      #   [ *alias , "value" ]
+      # Therefore we restrict aliases to numbers and ASCII letters.
+      start_mark = reader.get_mark
+      indicator = reader.peek
+      if indicator == '*'
+        name = 'alias'
+      else
+        name = 'anchor'
+      end
+      reader.forward
+      length = 0
+      ch = reader.peek(length)
+      # while '0' <= ch <= '9' or 'A' <= ch <= 'Z' or 'a' <= ch <= 'z' \
+      #         or ch in '-_'
+      while SweetStreetYaml.check_anchorname_char(ch)
+        length += 1
+        ch = reader.peek(length)
+      end
+      unless length.to_boolean
+        raise ScannerError.new(
+          _F('while scanning an {name!s}', name=name),
+          start_mark,
+          _F('expected alphabetic or numeric character, but found {ch!r}', ch=ch),
+          reader.get_mark,
+          )
+      end
+      value = reader.prefix(length)
+      reader.forward(length)
+      # ch1 = ch
+      # ch = reader.peek   # no need to peek, ch is already set
+      # assert ch1 == ch
+      unless "\0 \t\r\n\x85\u2028\u2029?:,[]{}%@`".include?(ch)
+        raise ScannerError.new(
+          _F('while scanning an {name!s}', name=name),
+          start_mark,
+          _F('expected alphabetic or numeric character, but found {ch!r}', ch=ch),
+          reader.get_mark,
+          )
+      end
+      end_mark = reader.get_mark
+      token_class.new(value, start_mark, end_mark)
+    end
+
+    def scan_tag
+      # See the specification for details.
+      start_mark = reader.get_mark
+      ch = reader.peek(1)
+      if ch == '<'
+        handle = nil
+        reader.forward(2)
+        suffix = scan_tag_uri('tag', start_mark)
+        unless reader.peek == '>'
+          raise ScannerError.new(
+            'while parsing a tag',
+            start_mark,
+            _F("expected '>', but found {srp_call!r}", srp_call=reader.peek),
+            reader.get_mark,
+            )
+        end
+        reader.forward
+      elsif THE_END_SPACE_TAB.include?(ch)
+        handle = nil
+        suffix = '!'
+        reader.forward
+      else
+        length = 1
+        use_handle = false
+        until "\0 \r\n\x85\u2028\u2029".include?(ch)
+          if ch == '!'
+            use_handle = true
+            break
+          end
+          length += 1
+          ch = reader.peek(length)
+        end
+        handle = '!'
+        if use_handle
+          handle = scan_tag_handle('tag', start_mark)
+        else
+          handle = '!'
+          reader.forward
+        end
+        suffix = scan_tag_uri('tag', start_mark)
+      end
+      ch = reader.peek
+      unless "\0 \r\n\x85\u2028\u2029".include?(ch)
+        raise ScannerError.new(
+          'while scanning a tag',
+          start_mark,
+          _F("expected ' ', but found {ch!r}", ch=ch),
+          reader.get_mark,
+          )
+      end
+      value = [handle, suffix]
+      end_mark = reader.get_mark
+      TagToken.new(value, start_mark, end_mark)
+    end
+
+    def scan_block_scalar(style, rt = false)
+      # See the specification for details.
+      folded = (style == '>')
+
+      chunks = []
+      start_mark = reader.get_mark
+
+      # Scan the header.
+      reader.forward
+      chomping, increment = scan_block_scalar_indicators(start_mark)
+      # block scalar comment e.g. : |+  # comment text
+      block_scalar_comment = scan_block_scalar_ignored_line(start_mark)
+
+      # Determine the indentation level and go to the first non-empty line.
+      min_indent = @indent + 1
+      if increment.nil?
+        # no increment and top level, min_indent could be 0
+        if min_indent < 1 &&
+          (!'|>'.include?(style)
+          || (scanner_processing_version == [1, 1])
+          && @loader.__send__('top_level_block_style_scalar_no_indent_error_1_1')
+          )
+          min_indent = 1
+        end
+        breaks, max_indent, end_mark = scan_block_scalar_indentation
+        indent = max(min_indent, max_indent)
+      else
+        if min_indent < 1
+          min_indent = 1
+        end
+        indent = min_indent + increment - 1
+        breaks, end_mark = scan_block_scalar_breaks(indent)
+      end
+      line_break = ''
+
+      # Scan the inner part of the block scalar.
+      while reader.column == indent && reader.peek != "\0"
+        chunks.extend(breaks)
+        leading_non_space = !" \t".include?(reader.peek)
+        length = 0
+        until THE_END.include?(reader.peek(length))
+          length += 1
+        end
+        chunks.append(reader.prefix(length))
+        reader.forward(length)
+        line_break = scan_line_break
+        breaks, end_mark = scan_block_scalar_breaks(indent)
+        if '|>'.include?(style) && min_indent == 0
+          # at the beginning of a line, if in block style see if
+          # end of document/start_new_document
+          if check_document_start or check_document_end
+            break
+          end
+        end
+
+        if reader.column == indent && reader.peek != "\0"
+          # Unfortunately, folding rules are ambiguous.
+          #
+          # This is the folding according to the specification
+
+          if rt && folded && line_break == "\n"
+            chunks.append("\a")
+          end
+          if folded && line_break == "\n" && leading_non_space && !" \t".include?(reader.peek)
+            if breaks.empty?
+              chunks.append(' ')
+            end
+          else
+            chunks.append(line_break)
+
+            # This is Clark Evans's interpretation (also in the spec
+            # examples)
+            #
+            # if folded and line_break == '\n'
+            #     if not breaks
+            #         if reader.peek not in ' \t'
+            #             chunks.append(' ')
+            #         else
+            #             chunks.append(line_break)
+            # else
+            #     chunks.append(line_break)
+          end
+        else
+          break
+        end
+      end
+
+      # Process trailing line breaks. The 'chomping' setting determines
+      # whether they are included in the value.
+      trailing = []
+      if [nil, true].include?(chomping)
+        chunks.append(line_break)
+      end
+      if chomping == true
+        chunks.extend(breaks)
+      elsif [nil, false].include?(chomping)
+        trailing.extend(breaks)
+      end
+
+      # We are done.
+      token = ScalarToken.new(chunks.join, false, start_mark, end_mark, style)
+      unless @loader.nil?
+        comment_handler = @loader.__send__('comment_handling')
+        if comment_handler.nil?
+          unless block_scalar_comment>nil?
+            token.add_comment_pre([block_scalar_comment])
+          end
+        end
+      end
+      trailing_size = trailing.size
+      if trailing_size > 0
+        # Eat whitespaces and comments until we reach the next token.
+        unless @loader.nil?
+          comment_handler = @loader.__send__('comment_handling')
+          unless comment_handler.nil?
+            line = end_mark.line - trailing_size
+            trailing.each { |x|
+              raise unless x[-1] == "\n"
+              @comments.add_blank_line(x, 0, line)
+              line += 1
+            }
+          end
+        end
+        comment = scan_to_next_token
+        while comment
+          trailing.append(' ' * comment[1].column + comment[0])
+          comment = scan_to_next_token
+        end
+        unless @loader.nil?
+          comment_handler = @loader.__send__('comment_handling')
+          if comment_handler.nil?
+            # Keep track of the trailing whitespace and following comments
+            # as a comment token, if isn't all included in the actual value.
+            comment_end_mark = reader.get_mark
+            comment = CommentToken.new(trailing.join, end_mark, comment_end_mark)
+            token.add_comment_post(comment)
+          end
+        end
+        token
+      end
+    end
+
+    def scan_block_scalar_indicators(start_mark)
+      # See the specification for details.
+      chomping = nil
+      increment = nil
+      ch = reader.peek
+      if '+-'.include?(ch)
+        chomping = (ch == '+')
+        reader.forward
+        ch = reader.peek
+        if DIGITS.include?(ch)
+          increment = ch.to_i
+          if increment == 0
+            raise ScannerError.new(
+              'while scanning a block scalar',
+              start_mark,
+              'expected indentation indicator in the range 1-9, ' 'but found 0',
+              reader.get_mark,
+              )
+          end
+          reader.forward
+        end
+      elsif DIGITS.include?(ch)
+        increment = ch.to_i
+        if increment == 0
+          raise ScannerError.new(
+            'while scanning a block scalar',
+            start_mark,
+            'expected indentation indicator in the range 1-9, ' 'but found 0',
+            reader.get_mark,
+            )
+        end
+        reader.forward
+        ch = reader.peek
+        if '+-'.include?(ch)
+          chomping = (ch == '+')
+        end
+        reader.forward
+      end
+      ch = reader.peek
+      unless "\0 \r\n\x85\u2028\u2029".include?(ch)
+        raise ScannerError.new(
+          'while scanning a block scalar',
+          start_mark,
+          _F('expected chomping or indentation indicators, but found {ch!r}', ch=ch),
+          reader.get_mark,
+          )
+      end
+      [chomping, increment]
+    end
+
+    def scan_block_scalar_ignored_line(start_mark)
+      # See the specification for details.
+      prefix = ''
+      comment = nil
+      while reader.peek == ' '
+        prefix += reader.peek
+        reader.forward
+      end
+      if reader.peek == '#'
+        comment = prefix
+        until THE_END.include?(reader.peek)
+          comment += reader.peek
+          reader.forward
+        end
+      end
+      ch = reader.peek
+      unless THE_END.include?(ch)
+        raise ScannerError.new(
+          'while scanning a block scalar',
+          start_mark,
+          _F('expected a comment or a line break, but found {ch!r}', ch=ch),
+          reader.get_mark,
+          )
+      end
+      scan_line_break
+      comment
+    end
+
+    def scan_block_scalar_indentation
+      # See the specification for details.
+      chunks = []
+      max_indent = 0
+      end_mark = reader.get_mark
+      while " \r\n\x85\u2028\u2029".include?(reader.peek)
+        if reader.peek == ' '
+          reader.forward
+          if reader.column > max_indent
+            max_indent = reader.column
+          end
+        else
+          chunks.append(scan_line_break)
+          end_mark = reader.get_mark
+        end
+      end
+      [chunks, max_indent, end_mark]
+    end
+
+    def scan_block_scalar_breaks(indent)
+      # See the specification for details.
+      chunks = []
+      end_mark = reader.get_mark
+      while reader.column < indent && reader.peek == ' '
+        reader.forward
+      end
+      while "\r\n\x85\u2028\u2029".include?(reader.peek)
+        chunks.append(scan_line_break)
+        end_mark = reader.get_mark
+        while reader.column < indent && reader.peek == ' '
+          reader.forward
+        end
+      end
+      return chunks, end_mark
+    end
+
+    def scan_flow_scalar(style)
+      # See the specification for details.
+      # Note that we loose indentation rules for quoted scalars. Quoted
+      # scalars don't need to adhere indentation because " and ' clearly
+      # mark the beginning and the end of them. Therefore we are less
+      # restrictive then the specification requires. We only need to check
+      # that document separators are not included in scalars.
+      double = (style == '"')
+
+      chunks = []
+      start_mark = reader.get_mark
+      quote = reader.peek
+      reader.forward
+      chunks.extend(scan_flow_scalar_non_spaces(double, start_mark))
+      until reader.peek == quote
+        chunks += scan_flow_scalar_spaces(double, start_mark)
+        chunks += scan_flow_scalar_non_spaces(double, start_mark)
+      end
+      reader.forward
+      end_mark = reader.get_mark
+      ScalarToken.new("".join(chunks), false, start_mark, end_mark, style)
+    end
+
+    def scan_flow_scalar_non_spaces(double, start_mark)
+      # See the specification for details.
+      chunks = []
+      loop do
+        length = 0
+        until " \n\"'\\\0\t\r\x85\u2028\u2029".include?(reader.peek(length))
+          length += 1
+        end
+        unless length == 0
+          chunks.append(reader.prefix(length))
+          reader.forward(length)
+        end
+        ch = reader.peek
+        if !double && ch == "'" && reader.peek(1) == "'"
+          chunks.append("'")
+          reader.forward(2)
+        elsif (double && ch == "'") || (!double && '"\\'.include?(ch))
+          chunks.append(ch)
+          reader.forward
+        elsif double && ch == '\\'
+          reader.forward
+          ch = reader.peek
+          if ESCAPE_REPLACEMENTS.include?(ch)
+            chunks.append(ESCAPE_REPLACEMENTS[ch])
+            reader.forward
+          elsif ESCAPE_CODES.include?(ch)
+            length = ESCAPE_CODES[ch]
+            reader.forward
+            0.upto(length - 1) do |i|
+              unless '0123456789ABCDEFabcdef'.include?(reader.peek(k))
+                raise ScannerError.new(
+                  'while scanning a double-quoted scalar',
+                  start_mark,
+                  _F(
+                    'expected escape sequence of {length:d} hexdecimal '
+                'numbers, but found {srp_call!r}',
+                  length=length,
+                    srp_call=reader.peek(k),
+                ),
+                  reader.get_mark,
+                )
+              end
+            end
+            code = reader.prefix(length).to_i(16)
+            chunks.append(code.chr)
+            reader.forward(length)
+          elsif "\n\r\x85\u2028\u2029".include?(ch)
+            scan_line_break
+            chunks += scan_flow_scalar_breaks(double, start_mark)
+          else
+            raise ScannerError.new(
+              'while scanning a double-quoted scalar',
+              start_mark,
+              _F('found unknown escape character {ch!r}', ch=ch),
+              reader.get_mark,
+              )
+          end
+        else
+          return chunks
+        end
+      end
+    end
+
+    LINE_ENDINGS_REGEXP = Regexp.new("\r\n\x85\u2028\u2029")
+    def scan_flow_scalar_spaces(double, start_mark)
+      # See the specification for details.
+      chunks = []
+      length = 0
+      while " \t".include?(reader.peek(length))
+        length += 1
+      end
+      whitespaces = reader.prefix(length)
+      reader.forward(length)
+      ch = reader.peek
+      case ch
+        when"\0"
+          raise ScannerError.new(
+            'while scanning a quoted scalar',
+            start_mark,
+            'found unexpected end of stream',
+            reader.get_mark,
+            )
+        when LINE_ENDINGS_REGEXP
+          line_break = scan_line_break
+          breaks = scan_flow_scalar_breaks(double, start_mark)
+          if line_break != "\n"
+            chunks.append(line_break)
+          elsif breaks.empty?
+            chunks.append(' ')
+            chunks += breaks
+          end
+      else
+        chunks.append(whitespaces)
+      end
+
+      chunks
+    end
+
+    def scan_flow_scalar_breaks(double, start_mark)
+      # See the specification for details.
+      chunks = []
+      loop do
+        # Instead of checking indentation, we check for document
+        # separators.
+        prefix = reader.prefix(3)
+        if (prefix == '---' || prefix == '...') && THE_END_SPACE_TAB.include?(reader.peek(3))
+          raise ScannerError.new(
+            'while scanning a quoted scalar',
+            start_mark,
+            'found unexpected document separator',
+            reader.get_mark,
+            )
+        end
+        while " \t".include?(reader.peek)
+          reader.forward
+        end
+        if "\r\n\x85\u2028\u2029".include?(reader.peek)
+          chunks.append(scan_line_break)
+        else
+          return chunks
+        end
+      end
+    end
+
+    def scan_plain
+      # See the specification for details.
+      # We add an additional restriction for the flow context
+      #   plain scalars in the flow context cannot contain ',', ': '  and '?'.
+      # We also keep track of the `allow_simple_key` flag here.
+      # Indentation rules are loosed for the flow context.
+      chunks = []
+      start_mark = reader.get_mark
+      end_mark = start_mark
+      indent = @indent + 1
+      # We allow zero indentation for scalars, but then we need to check for
+      # document separators at the beginning of the line.
+      # if indent == 0
+      #     indent = 1
+      spaces = []  # type: List[Any]
+      loop do
+        length = 0
+        break if reader.peek == '#'
+        loop do
+          ch = reader.peek(length)
+          if ch == ':' &&  !THE_END_SPACE_TAB.include?(reader.peek(length + 1))
+            next
+          elsif ch == '?' && scanner_processing_version != [1, 1]
+            next
+          elsif (
+          THE_END_SPACE_TAB.include?(ch)
+          || (
+          !flow_level.to_boolean &&
+            ch == ':' &&
+            THE_END_SPACE_TAB.include?(reader.peek(length + 1))
+          )
+          || (flow_level.to_boolean && ',:?[]{}'.include?(ch))
+          )
+            break
+          end
+          length += 1
+        end
+        # It's not clear what we should do with ':' in the flow context.
+        if (
+        flow_level.to_boolean &&
+          ch == ':' &&
+          !"\0 \t\r\n\x85\u2028\u2029,[]{}".include?(reader.peek(length + 1))
+        )
+          reader.forward(length)
+          raise ScannerError.new(
+            'while scanning a plain scalar',
+            start_mark,
+            "found unexpected ':'",
+            reader.get_mark,
+            'Please check '
+          'http://pyyaml.org/wiki/YAMLColonInFlowContext '
+          'for details.',
+          )
+        end
+        break if length == 0
+        @allow_simple_key = false
+        chunks += spaces
+        chunks.append(reader.prefix(length))
+        reader.forward(length)
+        end_mark = reader.get_mark
+        spaces = scan_plain_spaces(indent, start_mark)
+        if (
+        spaces.empty? ||
+          reader.peek == '#' ||
+          (!flow_level.to_boolean && reader.column < indent)
+        )
+          break
+        end
+      end
+
+      token = ScalarToken.new(chunks.join, true, start_mark, end_mark)
+      # getattr provides true so C type loader, which cannot handle comment,
+      # will not make CommentToken
+      unless @loader.nil?
+        comment_handler = @loader.__send__('comment_handling')
+        if comment_handler.nil?
+          if spaces[0] == "\n"
+            # Create a comment token to preserve the trailing line breaks.
+            comment = CommentToken.new("".join(spaces) + "\n", start_mark, end_mark)
+            token.add_comment_post(comment)
+          end
+        elsif comment_handler != false
+          line = start_mark.line + 1
+          spaces.each { |ch|
+            if ch == "\n"
+              @comments.add_blank_line("\n", 0, line)
+              line += 1
+            end
+          }
+        end
+      end
+
+      token
+    end
+
+    def scan_plain_spaces(indent, start_mark)
+      # See the specification for details.
+      # The specification is really confusing about tabs in plain scalars.
+      # We just forbid them completely. Do not use tabs in YAML!
+      chunks = []
+      length = 0
+      while reader.peek(length) == ' '
+        length += 1
+      end
+      whitespaces = reader.prefix(length)
+      reader.forward(length)
+      ch = reader.peek
+      if "\r\n\x85\u2028\u2029".include?(ch)
+        line_break = scan_line_break
+        @allow_simple_key = true
+        prefix = reader.prefix(3)
+        return if (prefix == '---' || prefix == '...') && THE_END_SPACE_TAB.include?(reader.peek(3))
+        breaks = []
+        while " \r\n\x85\u2028\u2029".include?(reader.peek)
+          if reader.peek == ' '
+            reader.forward
+          else
+            breaks.append(scan_line_break)
+            prefix = reader.prefix(3)
+            return if (prefix == '---' || prefix == '...') && THE_END_SPACE_TAB.include?(reader.peek(3))
+          end
+        end
+        if line_break != "\n"
+          chunks.append(line_break)
+        elsif breaks.empty?
+          chunks.append(' ')
+        end
+        chunks += breaks
+      elsif whitespaces
+        chunks.append(whitespaces)
+      end
+
+      chunks
+    end
+
+    def scan_tag_handle(name, start_mark)
+      # See the specification for details.
+      # For some strange reasons, the specification does not allow '_' in
+      # tag handles. I have allowed it anyway.
+      if ch != '!'
+        raise ScannerError.new(
+          _F('while scanning an {name!s}', name=name),
+          start_mark,
+          _F("expected '!', but found {ch!r}", ch=ch),
+          reader.get_mark,
+          )
+      end
+      length = 1
+      ch = reader.peek(length)
+      if ch != ' '
+        while ALPHANUMERIC_CHARACTERS.include?(ch) || '-_'.include?(ch)
+          length += 1
+          ch = reader.peek(length)
+        end
+        if ch != '!'
+          reader.forward(length)
+          raise ScannerError.new(
+            _F('while scanning an {name!s}', name=name),
+            start_mark,
+            _F("expected '!', but found {ch!r}", ch=ch),
+            reader.get_mark,
+            )
+        end
+        length += 1
+      end
+      value = reader.prefix(length)
+      reader.forward(length)
+
+      value
+    end
+
+    def scan_tag_uri(name, start_mark)
+      # See the specification for details.
+      # Note: we do not check if URI is well-formed.
+      chunks = []
+      length = 0
+      ch = reader.peek(length)
+      while (
+        ALPHANUMERIC_CHARACTERS.include?(ch) ||
+        "-;/?:@&=+$,_.!~*'()[]%".include?(ch) ||
+        ((scanner_processing_version > [10 * 1, 1]) && ch == '#')
+      )
+        if ch == '%'
+          chunks.append(reader.prefix(length))
+          reader.forward(length)
+          length = 0
+          chunks.append(scan_uri_escapes(name, start_mark))
+        else
+          length += 1
+        end
+        ch = reader.peek(length)
+        if length != 0
+          chunks.append(reader.prefix(length))
+          reader.forward(length)
+          length = 0
+        end
+        if chunks.empty?
+          raise ScannerError.new(
+            _F('while parsing an {name!s}', name=name),
+            start_mark,
+            _F('expected URI, but found {ch!r}', ch=ch),
+            reader.get_mark,
+            )
+        end
+      end
+
+      chunks.join
+    end
+
+    def scan_uri_escapes(name, start_mark)
+      # See the specification for details.
+      code_bytes = []
+      mark = reader.get_mark
+      while reader.peek == '%'
+        reader.forward
+        0.upto(1) { |k|
+          unless '0123456789ABCDEFabcdef'.include?(reader.peek(k))
+            raise ScannerError.new(
+              _F('while scanning an {name!s}', name=name),
+              start_mark,
+              _F(
+                'expected URI escape sequence of 2 hexdecimal numbers,'
+            ' but found {srp_call!r}',
+              srp_call=reader.peek(k),
+            ),
+              reader.get_mark,
+            )
+          end
+        }
+        code_bytes.append(reader.prefix(2).to_i(16))
+        reader.forward(2)
+      end
+      begin
+        value = code_bytes.bytes.encode('UTF-8')
+      rescue UnicodeDecodeError => exc
+        raise ScannerError.new(
+          _F('while scanning an {name!s}', name=name), start_mark, str(exc), mark
+        )
+      end
+
+      value
+    end
+
+    def scan_line_break
+      # Transforms
+      #   '\r\n'      :   '\n'
+      #   '\r'        :   '\n'
+      #   '\n'        :   '\n'
+      #   '\x85'      :   '\n'
+      #   '\u2028'    :   '\u2028'
+      #   '\u2029     :   '\u2029'
+      #   default     :   ''
+      ch = reader.peek
+      if "\r\n\x85".include?(ch)
+        if reader.prefix(2) == "\r\n"
+          reader.forward(2)
+        else
+          reader.forward
+        end
+        return "\n"
+      elsif "\u2028\u2029".include?(ch)
+        reader.forward
+        return ch
+      end
+
+      ''
+    end
+  end
+
+  class RoundTripScanner < Scanner
+    def check_token(*choices)
+      # Check if the next token is one of the given types.
+      while need_more_tokens
+        fetch_more_tokens
+      end
+      _gather_comments
+      if @tokens.size > 0
+        return true if choices.empty?
+        choices.each { |choice| return true if @tokens[0].instance_of?(choice) }
+      end
+      false
+    end
+
+    def peek_token
+      # Return the next token, but do not delete if from the queue.
+      while need_more_tokens
+        fetch_more_tokens
+      end
+      _gather_comments
+      return @tokens[0] if @tokens.size > 0
+    end
+
+    def _gather_comments
+      # combine multiple comment lines and assign to next non-comment-token
+      comments = []
+      return comments if @tokens.empty?
+      if @tokens[0].intance_of?(CommentToken)
+        comment = @tokens.pop(0)
+        @tokens_taken += 1
+        comments.append(comment)
+      end
+      while need_more_tokens
+        fetch_more_tokens
+        return comments if @tokens.empty?
+        if @tokens[0].instance_of?(CommentToken)
+          @tokens_taken += 1
+          comment = @tokens.pop(0)
+          comments.append(comment)
+        end
+      end
+      if comments.size >= 1
+        @tokens[0].add_comment_pre(comments)
+      end
+      # pull in post comment on e.g. ':'
+      if !@done && @tokens.size < 2
+        fetch_more_tokens
+      end
+    end
+
+    def get_token
+      # Return the next token.
+      while need_more_tokens
+        fetch_more_tokens
+      end
+      _gather_comments
+      if @tokens.size > 0
+        # only add post comment to single line tokens
+        # scalar, value token. FlowXEndToken, otherwise
+        # hidden streamtokens could get them (leave them and they will be
+        # pre comments for the next map/seq
+        if (
+        @tokens.size > 1 &&
+          (
+          @tokens[0].instance_of?(ScalarToken) ||
+            @tokens[0].instance_of?(ValueToken) ||
+            @tokens[0].instance_of?(FlowSequenceEndToken) ||
+            @tokens[0].instance_of?(FlowMappingEndToken)
+          ) &&
+          @tokens[1].instance_of?(CommentToken) &&
+          @tokens[0].end_mark.line == @tokens[1].start_mark.line
+        )
+          @tokens_taken += 1
+          c = @tokens.pop(1)
+          fetch_more_tokens
+          while @tokens.size > 1 && @tokens[1].instance_of?(CommentToken)
+            @tokens_taken += 1
+            c1 = @tokens.pop(1)
+            c.value = c.value + (' ' * c1.start_mark.column) + c1.value
+            fetch_more_tokens
+          end
+          @tokens[0].add_comment_post(c)
+        elsif (
+        @tokens.size > 1 &&
+          @tokens[0].instance_of?(ScalarToken) &&
+          @tokens[1].instance_of?(CommentToken) &&
+          @tokens[0].end_mark.line != @tokens[1].start_mark.line
+        )
+          @tokens_taken += 1
+          c = @tokens.pop(1)
+          c.value = (
+          '\n' * (c.start_mark.line - @tokens[0].end_mark.line)
+          + (' ' * c.start_mark.column)
+          + c.value
+          )
+          @tokens[0].add_comment_post(c)
+          fetch_more_tokens
+          while len(@tokens) > 1 and isinstance(@tokens[1], CommentToken)
+            @tokens_taken += 1
+            c1 = @tokens.pop(1)
+            c.value = c.value + (' ' * c1.start_mark.column) + c1.value
+            fetch_more_tokens
+          end
+        end
+        @tokens_taken += 1
+        return @tokens.pop(0)
+      end
+      # return nil
+    end
+
+    def fetch_comment(comment)
+      value, start_mark, end_mark = comment
+      while value&.last == ' '
+        # empty line within indented key context
+        # no need to update end-mark, that is not used
+        value.chop!
+      end
+      @tokens.append(CommentToken.new(value, start_mark, end_mark))
+    end
+
+    # scanner
+
+    def scan_to_next_token
+      # We ignore spaces, line breaks and comments.
+      # If we find a line break in the block context, we set the flag
+      # `allow_simple_key` on.
+      # The byte order mark is stripped if it's the first character in the
+      # stream. We do not yet support BOM inside the stream as the
+      # specification requires. Any such mark will be considered as a part
+      # of the document.
+      #
+      # TODO: We need to make tab handling rules more sane. A good rule is
+      #   Tabs cannot precede tokens
+      #   BLOCK-SEQUENCE-START, BLOCK-MAPPING-START, BLOCK-END,
+      #   KEY(block), VALUE(block), BLOCK-ENTRY
+      # So the checking code is
+      #   if <TAB>
+      #       @allow_simple_keys = false
+      # We also need to add the check for `allow_simple_keys == true` to
+      # `unwind_indent` before issuing BLOCK-END.
+      # Scanners for block, flow, and plain scalars need to be modified.
+
+      if reader.index == 0 && reader.peek == "\uFEFF"
+        reader.forward
+      end
+      found = false
+      until found
+        while reader.peek == ' '
+          reader.forward
+        end
+        ch = reader.peek
+        if ch == '#'
+          start_mark = reader.get_mark
+          comment = ch
+          reader.forward
+          until THE_END.include?(ch)
+            ch = reader.peek
+            if ch == "\0"  # don't gobble the end-of-stream character
+              # but add an explicit newline as "YAML processors should terminate
+              # the stream with an explicit line break
+              # https://yaml.org/spec/1.2/spec.html#id2780069
+              comment += "\n"
+              break
+            end
+            comment += ch
+            reader.forward
+          end
+          # gather any blank lines following the comment too
+          ch = scan_line_break
+          while ch.sie > 0
+            comment += ch
+            ch = scan_line_break
+          end
+          end_mark = reader.get_mark
+          unless flow_level.to_boolean
+            @allow_simple_key = true
+          end
+          return comment, start_mark, end_mark
+        end
+        if scan_line_break == ''
+          found = true
+        else
+          start_mark = reader.get_mark
+          unless flow_level.to_boolean
+            @allow_simple_key = true
+          end
+          ch = reader.peek
+          if ch == "\n"  # empty toplevel lines
+            start_mark = reader.get_mark
+            comment = +""
+            until ch.empty?
+              ch = scan_line_break(empty_line=true)
+              comment += ch
+            end
+            if reader.peek == '#'
+              # empty line followed by indented real comment
+              comment = comment[0...comment.rindex("\n")] + "\n"
+            end
+            end_mark = reader.get_mark
+            return comment, start_mark, end_mark
+          end
+        end
+      end
+      # return nil
+    end
+
+    def scan_line_break(empty_line = false)
+      # Transforms
+      #   '\r\n'      :   '\n'
+      #   '\r'        :   '\n'
+      #   '\n'        :   '\n'
+      #   '\x85'      :   '\n'
+      #   '\u2028'    :   '\u2028'
+      #   '\u2029     :   '\u2029'
+      #   default     :   ''
+      ch = reader.peek
+      if "\r\n\x85".include?(ch)
+        if reader.prefix(2) == "\r\n"
+          reader.forward(2)
+        else
+          reader.forward
+        end
+        return "\n"
+      elsif "\u2028\u2029".include?(ch)
+        reader.forward
+        return ch
+      elsif empty_line && "\t ".include?(ch)
+        reader.forward
+        return ch
+      end
+
+      ''
+    end
+
+    def scan_block_scalar(style, rt = true)
+      super
+    end
+  end
+
+    # commenthandling 2021, differentiatiation not needed
+
+VALUECMNT = 0
+KEYCMNT = 0  # 1
+# TAGCMNT = 2
+# ANCHORCMNT = 3
+
+
+  class CommentBase
+    attr_accessor :line, :column, :value, :uline, :used, :fline, :ufun, :function
+
+    def initialize(value, line, column)
+      @value = value
+      @line = line
+      @column = column
+      @used = ' '
+      # info = inspect.getframeinfo(
+      #   inspect.stack()[3][0] # list of named tuples FrameInfo(frame, filename, lineno, function, code_context, index) is returned
+      # ) # Traceback(filename, lineno, function, code_context, index) is returned
+      _info = caller(3)[0] # "prog:13:in `<main>'"
+      @function = _info[_info.rindex('`')..._info.rindex("'")] # info.function
+      index_of_first_colon = _info.index( ':' )
+      index_of_second_colon = _info.index( ':', index_of_first_colon )
+      @fline = _info[index_of_first_colon...index_of_second_colon] # info.lineno
+      @ufun = nil
+      @uline = nil
+    end
+
+    def set_used(v = '+')
+      @used = v
+      # info = inspect.getframeinfo(inspect.stack()[1][0])
+      _info = caller(1)[0]
+      @ufun = _info[_info.rindex('`')..._info.rindex("'")] # info.function
+      @uline = _info[index_of_first_colon...index_of_second_colon] # info.lineno
+    end
+
+    def set_assigned
+      @used = '|'
+    end
+
+    def to_s
+      return _F('{value}', value=@value)
+    end
+
+    def inspect
+      return _F('{value!r}', value=@value)
+    end
+  end
+
+
+  class EOLComment < CommentBase
+    @@name = 'EOLC'
+  end
+
+
+  class FullLineComment < CommentBase
+    @@name = 'FULL'
+  end
+
+
+  class BlankLineComment < CommentBase
+    @@name = 'BLNK'
+  end
+
+
+  class ScannedComments
+    def initialize
+      @comments = {}
+      @unused = []
+    end
+
+    def add_eol_comment(comment, column, line)
+      if comment.count("\n") == 1
+        raise unless comment[-1] == "\n"
+      else
+        raise unless comment.include?("\n")
+      end
+      @comments[line] = retval = EOLComment.new(comment[0...-1], line, column)
+      @unused.append(line)
+      retval
+    end
+
+    def add_blank_line(comment, column, line)
+      # info = inspect.getframeinfo(inspect.stack()[1][0])
+      raise unless (comment.count("\n") == 1 && comment[-1] == "\n")
+      raise if @comments.include?(line)
+      @comments[line] = retval = BlankLineComment.new(comment[0...-1], line, column)
+      @unused.append(line)
+      retval
+    end
+
+    def add_full_line_comment(comment, column, line)
+      assert comment.count('\n') == 1 and comment[-1] == '\n'
+      @comments[line] = retval = FullLineComment.new(comment[0...-1], line, column)
+      @unused.append(line)
+      retval
+    end
+
+    def [](idx)
+      @comments[idx]
+    end
+
+    def to_str
+      "ParsedComments:\n  "
+      +
+      (
+      _F('{lineno:2} {x}', lineno=lineno, x=x.info())
+      for lineno, x in @comments.items end
+      ).join("\n  ")
+      + "\n"
+    end
+
+    def last
+      lineno, x = @comments.items.to_a[-1]
+      return _F('{lineno:2} {x}\n', lineno=lineno, x=x.info())
+    end
+
+    def any_unprocessed
+      # ToDo: might want to differentiate based on lineno
+      @unused.size > 0
+      # for lno, comment in reversed(@comments.items())
+      #    if comment.used == ' '
+      #        return true
+      # return false
+    end
+
+    def unprocessed(use = false)
+      while @unused.size > 0
+        first = use ? @unused.pop(0) : @unused[0]
+        # info = inspect.getframeinfo(inspect.stack()[1][0])
+        # xprintf('using', first, @comments[first].value, info.function, info.lineno)
+        yield first, @comments[first]
+        if use
+          @comments[first].set_used
+        end
+      end
+    end
+
+    def assign_pre(token)
+      token_line = token.start_mark.line
+      # info = inspect.getframeinfo(inspect.stack()[1][0])
+      # xprintf('assign_pre', token_line, @unused, info.function, info.lineno)
+      gobbled = false
+      while !@unused.empty? && @unused[0] < token_line
+        gobbled = true
+        first = @unused.pop(0)
+        # xprintf('assign_pre < ', first)
+        @comments[first].set_used()
+        token.add_comment_pre(first)
+      end
+      gobbled
+    end
+
+    def assign_eol(tokens)
+      return unless comment_line = @unused&.first
+
+      return unless @comments[comment_line].instance(EOLComment)
+
+      idx = 1
+      _token = tokens[-idx]
+      while _token.start_mark.line > comment_line || _token.instance_of?( ValueToken)
+        idx += 1
+      end
+      # xprintf('idx1', idx)
+      return if
+        tokens.size > idx &&
+          tokens[-idx].instance_of?(ScalarToken) &&
+          tokens[-(idx + 1)].instance_of?(ScalarToken)
+
+      begin
+        if tokens[-idx].instance(ScalarToken) && tokens[-(idx + 1)].instance_of?(KeyToken)
+          begin
+            eol_idx = @unused.pop(0)
+            @comments[eol_idx].set_used
+            # xprintf('>>>>>a', idx, eol_idx, KEYCMNT)
+            tokens[-idx].add_comment_eol(eol_idx, KEYCMNT)
+          rescue IndexError
+            raise NotImplementedError
+          end
+          return
+        end
+      rescue IndexError
+        # xprintf('IndexError1')
+      end
+
+      begin
+        if tokens[-idx].instance_of?(ScalarToken) &&
+          ((_token = tokens[-(idx + 1)]).instance_of?(ValueToken) || _token.instance_of?(BlockEntryToken))
+          begin
+            eol_idx = @unused.pop(0)
+            @comments[eol_idx].set_used()
+            tokens[-idx].add_comment_eol(eol_idx, VALUECMNT)
+          rescue IndexError
+            raise NotImplementedError
+          end
+          return
+        end
+      rescue IndexError
+        # xprintf('IndexError2')
+      end
+
+      # for t in tokens
+      #     xprintf('tt-', t)
+      # xprintf('not implemented EOL', type(tokens[-idx]))
+      # import sys
+
+      exit(0)
+    end
+
+    def assign_post(token)
+      token_line = token.start_mark.line
+      # info = inspect.getframeinfo(inspect.stack()[1][0])
+      # xprintf('assign_post', token_line, @unused, info.function, info.lineno)
+      gobbled = false
+      while !@unused.empty? && @unused[0] < token_line
+        gobbled = true
+        first = @unused.pop(0)
+        # xprintf('assign_post < ', first)
+        @comments[first].set_used()
+        token.add_comment_post(first)
+      end
+      gobbled
+    end
+
+    def str_unprocessed
+      (
+        # _F('  {ind:2} {x}\n', ind=ind, x=x.info())
+        for ind, x in @comments.items
+        if x.used == ' '
+          ).join('')
+        end
+      end
+    end
+  end
+
+
+  class RoundTripScannerSC < Scanner  # RoundTripScanner Split Comments
+    def initialize(*arg, **kw)
+      super(*arg, **kw)
+      raise if @loader.nil?
+      # comments isinitialised on .need_more_tokens and persist on
+      # @loader.parsed_comments
+      @comments = nil
+    end
+
+    def get_token
+      # Return the next token.
+      while need_more_tokens
+        fetch_more_tokens
+      end
+      if @tokens.size > 0
+        if (_token = @tokens[0]).instance_of?(BlockEndToken)
+          @comments.assign_post(_token)
+        else
+          @comments.assign_pre(_token)
+        end
+        @tokens_taken += 1
+        @tokens.pop(0)
+      end
+    end
+
+    def need_more_tokens
+      if @comments.nil?
+        @loader.parsed_comments = @comments = ScannedComments.new
+      end
+      return false if @done
+
+      return true if @tokens.empty?
+
+      # The current token may be a potential simple key, so we
+      # need to look further.
+      stale_possible_simple_keys
+      return true if next_possible_simple_key == @tokens_taken
+
+      return true if @tokens.size < 2
+
+      first_token = @tokens[0]
+      return true if first_token.start_mark.line == @tokens[-1].start_mark.line
+
+      # if true
+      #     xprintf('-x--', len(@tokens))
+      #     for t in @tokens
+      #         xprintf(t)
+      #     # xprintf(@comments.last())
+      #     xprintf(@comments.str_unprocessed())  # type: ignore
+      @comments.assign_pre(first_token)
+      @comments.assign_eol(@tokens)
+    end
+
+    def scan_to_next_token
+      if reader.index == 0 && reader.peek == "\uFEFF"
+        reader.forward
+      end
+      start_mark = reader.get_mark
+      # xprintf('current_mark', start_mark.line, start_mark.column)
+      found = false
+      until found
+        while reader.peek == ' '
+          reader.forward
+        end
+        ch = reader.peek
+        if ch == '#'
+          comment_start_mark = reader.get_mark
+          comment = ch
+          reader.forward  # skip the '#'
+          until THE_END.include?(ch)
+            ch = reader.peek
+            if ch == "\0"  # don't gobble the end-of-stream character
+              # but add an explicit newline as "YAML processors should terminate
+              # the stream with an explicit line break
+              # https://yaml.org/spec/1.2/spec.html#id2780069
+              comment += "\n"
+              break
+            end
+            comment += ch
+            reader.forward
+          end
+          # we have a comment
+          if start_mark.column == 0
+            @comments.add_full_line_comment(comment, comment_start_mark.column, comment_start_mark.line)
+          else
+            @comments.add_eol_comment(comment, comment_start_mark.column, comment_start_mark.line)
+            comment = ''
+          end
+          # gather any blank lines or full line comments following the comment as well
+          scan_empty_or_full_line_comments
+          @allow_simple_key = true unless flow_level.to_boolean
+          return
+        end
+        if scan_line_break.to_boolean
+          # start_mark = reader.get_mark
+          @allow_simple_key = true unless flow_level.to_boolean
+          scan_empty_or_full_line_comments
+          return nil
+        end
+        ch = reader.peek
+        if ch == "\n"  # empty toplevel lines
+          start_mark = reader.get_mark
+          comment = +""
+          while ch
+            ch = scan_line_break(true)
+            comment += ch
+          end
+          if reader.peek == '#'
+            # empty line followed by indented real comment
+            comment = comment[0...comment.rindex("\n")] + "\n"
+          end
+          _ = reader.get_mark  # gobble end_mark
+          return nil
+        end
+        else
+        found = true
+      end
+      # return nil
+    end
+
+    def scan_empty_or_full_line_comments
+      blmark = reader.get_mark
+      assert blmark.column == 0
+      blanks = +""
+      comment = nil
+      mark = nil
+      ch = reader.peek
+      loop do
+        # nprint('ch', repr(ch), reader.get_mark.column)
+        if "\r\n\x85\u2028\u2029".include?(ch)
+          if reader.prefix(2) == "\r\n"
+            reader.forward(2)
+          else
+            reader.forward
+          end
+          if comment.nil?
+            blanks += "\n"
+            @comments.add_blank_line(blanks, blmark.column, blmark.line)
+          else
+            comment += "\n"
+            @comments.add_full_line_comment(comment, mark.column, mark.line)
+            comment = nil
+          end
+          blanks = +""
+          blmark = reader.get_mark
+          ch = reader.peek
+          next
+        end
+        if comment.nil?
+          if ch " \t".include?(ch)
+            blanks += ch
+          elsif ch == '#'
+            mark = reader.get_mark
+            comment = '#'
+          else
+            # xprintf('breaking on', repr(ch))
+            break
+          end
+        else
+          comment += ch
+        end
+        reader.forward
+        ch = reader.peek
+      end
+    end
+
+    def scan_block_scalar_ignored_line(start_mark)
+      # See the specification for details.
+      prefix = +""
+      comment = nil
+      while reader.peek == ' '
+        prefix += reader.peek
+        reader.forward
+      end
+      if reader.peek == '#'
+        comment = +""
+        mark = reader.get_mark
+        until THE_END.include?(reader.peek)
+          comment += reader.peek
+          reader.forward
+        end
+        comment += "\n"
+      end
+      ch = reader.peek
+      until THE_END.include?(reader.peek)
+        raise ScannerError.new(
+          'while scanning a block scalar',
+          start_mark,
+          _F('expected a comment or a line break, but found {ch!r}', ch=ch),
+          reader.get_mark,
+          )
+      end
+      @comments.add_eol_comment(comment, mark.column, mark.line) unless comment.nil?
+      scan_line_break
+      nil
+    end
   end
 end

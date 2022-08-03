@@ -79,7 +79,7 @@ require 'comments' # C_PRE, C_POST, C_SPLIT_ON_FIRST_BLANK
 require 'compat' # _F, nprint, nprintf
 
 
-module Ruamel
+module SweetStreetYaml
   MINIMUM_YAML_VERSION = [10 * 1, 1].sum
 
   class ParserError < MarkedYAMLError
