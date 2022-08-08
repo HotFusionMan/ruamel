@@ -1,0 +1,290 @@
+# encoding: utf-8
+
+# frozen_string_literal: true
+
+# This module contains abstractions for the input stream. You don't have to
+# looks further, there are no pretty code.
+#
+# We define two classes here.
+#
+#   Mark(source, line, column)
+# It's just a record and its only use is producing nice error messages.
+# Parser does not use it for any other purposes.
+#
+#   Reader(source, data)
+# Reader determines the encoding of `data` and converts it to unicode.
+# Reader provides the following methods and attributes
+#   reader.peek(length=1) - return the next `length` characters
+#   reader.forward(length=1) - move the current position to `length`
+#      characters.
+#   reader.index - the number of the current character.
+#   reader.line, stream.column - the line and the column of the current
+#      character.
+
+
+require 'error'
+require 'compat'
+require 'util'
+
+module SweetStreetYaml
+  class ReaderError < YAMLError
+    def initialize(name, position, character, encoding, reason)
+      @name = name
+      @character = character
+      @position = position
+      @encoding = encoding
+      @reason = reason
+    end
+
+    def to_str
+      if isinstance(@character, bytes)
+        return _F(
+          "'{self_encoding!s}' codec can't decode byte #x{ord_self_character:02x}: "
+        '{self_reason!s}\n'
+        '  in "{self_name!s}", position {self_position:d}',
+          self_encoding=encoding,
+            ord_self_character=ord(character),
+            self_reason=reason,
+            self_name=name,
+            self_position=position,
+        )
+      else
+        return _F(
+          'unacceptable character #x{self_character:04x}: {self_reason!s}\n'
+        '  in "{self_name!s}", position {self_position:d}',
+          self_character=character,
+            self_reason=reason,
+            self_name=name,
+            self_position=position,
+        )
+      end
+    end
+  end
+
+
+  class Reader
+    # Reader
+    # - determines the data encoding and converts it to a unicode string,
+    # - checks if characters are in allowed range,
+    # - adds '\0' to the end.
+
+    # Reader accepts
+    #  - a `bytes` object,
+    #  - a `str` object,
+    #  - a file-like object with its `read` method returning `str`,
+    #  - a file-like object with its `read` method returning `unicode`.
+
+    # Yeah, it's ugly and slow.
+
+    NON_PRINTABLE = Regexp.new("[^\x09\x0A\x0D\x20-\x7E\x85\xA0-\uD7FF\uE000-\uFFFD\U00010000-\U0010FFFF]")
+
+    def initialize(stream, loader = nil)
+      @loader = loader
+      @loader._reader ||= self
+      reset_reader
+      @stream = stream
+    end
+
+    def reset_reader
+      @name = nil
+      @stream_pointer = 0
+      @eof = true
+      @buffer = +""
+      @pointer = 0
+      @raw_buffer = nil
+      @raw_decode = nil
+      @encoding = nil
+      @index = 0
+      @line = 0
+      @column = 0
+    end
+
+    def stream
+      begin
+        return @_stream
+      rescue AttributeError
+        raise YAMLStreamError.new('input stream needs to specified')
+      end
+    end
+
+    def stream=(val)
+      return if val.nil?
+
+      @_stream = nil
+      if val.instance_of?(String)
+        @name = '<unicode string>'
+        check_printable(val)
+        @buffer = val + "\0"
+        # elsif isinstance(val, bytes)
+        #     name = '<byte string>'
+        #     raw_buffer = val
+        #     determine_encoding()
+      else
+        raise YAMLStreamError.new('stream argument needs to have a read() method') unless val.respond_to?(:read)
+        @_stream = val
+        @name = @stream.name || '<file>'
+        @eof = false
+        @raw_buffer = nil
+        determine_encoding
+      end
+    end
+
+    def peek(index = 0)
+      begin
+        return @buffer[@pointer + @index]
+      rescue IndexError
+        update(@index + 1)
+        return @buffer[@pointer + @index]
+      end
+    end
+
+    def prefix(length = 1)
+      update(length) if @pointer + length >= @buffer.size
+      @buffer[@pointer...(@pointer + length])]
+    end
+
+    def forward_1_1(length = 1)
+      update(length + 1) if @pointer + length + 1 >= @buffer.size
+      until length == 0
+        ch = @buffer[@pointer]
+        @pointer += 1
+        @index += 1
+        if "\n\x85\u2028\u2029".include?(ch) || (ch == "\r" && @buffer[@pointer] != "\n")
+          @line += 1
+          @column = 0
+        elsif ch != "\uFEFF"
+          @column += 1
+        end
+        length -= 1
+      end
+    end
+
+    def forward(length = 1)
+      update(length + 1) if @pointer + length + 1 >= @buffer.size
+      until length == 0
+        ch = @buffer[@pointer]
+        @pointer += 1
+        @index += 1
+        if ch == "\n" || (ch == "\r" && @buffer[@pointer] != "\n")
+          @line += 1
+          @column = 0
+        elsif ch != "\uFEFF"
+          @column += 1
+        end
+        length -= 1
+      end
+    end
+
+    def get_mark
+      if stream.nil?
+        StringMark.new(@name, @index, @line, @column, @buffer, @pointer)
+      else
+        FileMark.new(@name, @index, @line, @column)
+      end
+    end
+
+    # def determine_encoding
+    #     while not eof and (raw_buffer is nil or len(raw_buffer) < 2)
+    #         update_raw()
+    #     if isinstance(raw_buffer, bytes)
+    #         if raw_buffer.startswith("\xff\xfe")
+    #             raw_decode = codecs.utf_16_le_decode
+    #             encoding = 'utf-16-le'
+    #         elsif raw_buffer.startswith("\xfe\xff")
+    #             raw_decode = codecs.utf_16_be_decode
+    #             encoding = 'utf-16-be'
+    #         else
+    #             raw_decode = codecs.utf_8_decode  # type: ignore
+    #             encoding = 'utf-8'
+    #     update(1)
+
+
+    @@_printable_ascii = ("\x09\x0A\x0D" + (0x20..0x7F).map(&:chr).join)#.encode('ascii')
+
+    def self._get_non_printable_ascii(cls, data)
+      ascii_bytes = data.encode('ascii')
+      non_printables = ascii_bytes.tr(@@_printable_ascii, nil)
+      return nil if non_printables.empty?
+      non_printable = non_printables[0...-1]
+      return ascii_bytes.index(non_printable), non_printable.decode('ascii')
+    end
+
+    def self._get_non_printable_regex(cls, data)
+      match = NON_PRINTABLE.match(data)
+      return nil unless match.to_boolean
+      return match.begin, match[0]
+    end
+
+    def self._get_non_printable(cls, data)
+      begin
+        return cls._get_non_printable_ascii(data)
+      rescue UnicodeEncodeError
+        return cls._get_non_printable_regex(data)
+      end
+    end
+
+    def check_printable(data)
+      non_printable_match = self.class._get_non_printable(data)
+      unless non_printable_match.nil?
+        start, character = non_printable_match
+        @position = index + @buffer.size - @pointer + start
+        raise ReaderError.new(
+          @name,
+          @position,
+          ord(character),
+          'unicode',
+          'special characters are not allowed',
+          )
+      end
+    end
+
+    def update(length)
+      return if @raw_buffer.nil?
+
+      @buffer = @buffer[@pointer..-1]
+      @pointer = 0
+      while @buffer.size < length
+        update_raw unless @eof
+        unless @raw_decode.nil?
+          begin
+            data, converted = @raw_decode.call(@raw_buffer, 'strict', @eof)
+          rescue UnicodeDecodeError => exc
+            character = @raw_buffer[exc.start]
+            if !@stream.nil?
+              @position = @stream_pointer - @raw_buffer.size + exc.start
+            elsif !@stream.nil?
+              @position = @stream_pointer - @raw_buffer.size + exc.start
+            else
+              @position = exc.start
+            end
+            raise ReaderError.new(@name, @position, character, exc.encoding, exc.reason)
+          end
+        else
+          data = @raw_buffer
+          converted = data.size
+        end
+        check_printable(data)
+        @buffer += data
+        @raw_buffer = @raw_buffer[converted..-1]
+        if @eof
+          @buffer += "\0"
+          @raw_buffer = nil
+          break
+        end
+      end
+    end
+
+    def update_raw(size = nil)
+      data = @stream.read(size || 4096)
+      if @raw_buffer.nil?
+        @raw_buffer = data
+      else
+        @raw_buffer += data
+      end
+      @stream_pointer += data.size
+      if data.nil?
+        @eof = true
+      end
+    end
+  end
+end
