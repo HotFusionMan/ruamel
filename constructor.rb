@@ -555,7 +555,7 @@ module SweetStreetYaml
         end
         values = match.named_captures
       end
-      create_timestamp(**values)
+      SweetStreetYaml::Util.create_timestamp(**values)
     end
 
     def construct_yaml_omap(node)
@@ -1747,7 +1747,7 @@ module SweetStreetYaml
           )
       end
       values = match.named_captures
-      return create_timestamp(**values) unless values['hour']
+      return SweetStreetYaml::Util.create_timestamp(**values) unless values['hour']
       # return SafeConstructor.construct_yaml_timestamp(node, values)
       found = false
       %w[t tz_sign tz_hour tz_minute].each do |part|
@@ -1756,9 +1756,9 @@ module SweetStreetYaml
           break
         end
       end
-      return create_timestamp(**values) unless found
+      return SweetStreetYaml::Util.create_timestamp(**values) unless found
       # return SafeConstructor.construct_yaml_timestamp(node, values)
-      dd = create_timestamp(**values)  # this has delta applied
+      dd = SweetStreetYaml::Util.create_timestamp(**values)  # this has delta applied
       delta = nil
       if values['tz_sign']
         tz_hour = values['tz_hour'].to_i
