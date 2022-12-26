@@ -48,7 +48,7 @@ module SweetStreetYaml
         return nil unless @buffer  # always false
         head = ''
         start = @pointer
-        while start > 0 && !"\0\r\n\x85\u2028\u2029".include?(@buffer[start - 1] )
+        while start > 0 && !"\0\r\n\u{9b}\u2028\u2029".include?(@buffer[start - 1] )
             start -= 1
             if @pointer - start > max_length / 2 - 1
                 head = ' ... '
@@ -58,7 +58,7 @@ module SweetStreetYaml
         end
         tail = ''
         the_end = @pointer
-        while the_end < @buffer.size && !"\0\r\n\x85\u2028\u2029".include?(@buffer[the_end])
+        while the_end < @buffer.size && !"\0\r\n\u{9b}\u2028\u2029".include?(@buffer[the_end])
             the_end += 1
             if the_end - @pointer > max_length / 2 - 1
                 tail = ' ... '

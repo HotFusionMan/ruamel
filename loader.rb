@@ -2,12 +2,12 @@
 
 # frozen_string_literal: true
 
-require 'reader'
-require 'scanner'
-require 'parser'
-require 'composer'
-require 'constructor'
-require 'resolver'
+require_relative './reader'
+require_relative './scanner'
+require_relative './parser'
+require_relative './composer'
+require_relative './constructor'
+require_relative './resolver'
 
 module SweetStreetYaml
   class BaseLoader

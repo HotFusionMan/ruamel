@@ -11,8 +11,10 @@
 # from abc import abstractmethod
 # import collections.abc
 
+require_relative './sweet_street_yaml'
+
 module SweetStreetYaml
-  _DEFAULT_YAML_VERSION = Gem::Version.new("1.2")
+  _DEFAULT_YAML_VERSION = VERSION_1_2
 
 
 # replace with f-strings when 3.5 support is dropped
@@ -127,7 +129,7 @@ module SweetStreetYaml
   def check_namespace_char(ch)
     return true if "\x21" <= ch && ch <= "\x7E"  # ! to ~
 
-    return true if "\xA0" <= ch && ch <= "\uD7FF"
+    return true if "\u{A0}" <= ch && ch <= "\uD7FF"
 
     return true if ("\uE000" <= ch && ch <= "\uFFFD") && ch != "\uFEFF"  # excl. byte order mark
 

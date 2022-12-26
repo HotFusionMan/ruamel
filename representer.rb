@@ -35,7 +35,18 @@
 # import types
 #
 # import copyreg
+
 require 'base64'
+require 'date'
+
+require_relative './error'
+require_relative './nodes'
+require_relative './comments'
+require_relative './scalar_int'
+require_relative './scalar_float'
+require_relative './scalar_boolean'
+require_relative './timestamp'
+require_relative './anchor'
 
 module SweetStreetYaml
   class RepresenterError < YAMLError
@@ -45,8 +56,17 @@ module SweetStreetYaml
   class BaseRepresenter
     @yaml_representers = {}
     @yaml_multi_representers = {}
-    class << self
-      attr_accessor :yaml_representers, :yaml_multi_representers
+    def self.yaml_representers
+      @yaml_representers
+    end
+    def self.yaml_multi_representers
+      @yaml_multi_representers
+    end
+    def yaml_representers
+      self.class.yaml_representers
+    end
+    def yaml_multi_representers
+      self.class.yaml_multi_representers
     end
 
     def initialize(default_style: nil, default_flow_style: nil, dumper: nil)
@@ -78,6 +98,7 @@ module SweetStreetYaml
       @alias_key = nil
     end
 
+    class << self
     def represent_data(data)
       if ignore_aliases(data)
         @alias_key = nil
@@ -103,7 +124,7 @@ module SweetStreetYaml
         found = false
         data_types.each do |data_type|
           if @yaml_multi_representers.include?(data_type)
-            node = @yaml_multi_representers[data_type](data)
+            node = @yaml_multi_representers[data_type].call(data)
             found = true
             break
           end
@@ -132,19 +153,19 @@ module SweetStreetYaml
         "
       represent_data(data)
     end
-
-    def self.add_representer(cls, data_type, representer)
-      # if 'yaml_representers' not in cls.__dict__
-      #     cls.yaml_representers = cls.yaml_representers.copy()
-      cls.yaml_representers[data_type] = representer
     end
 
-    def self.add_multi_representer(cls, data_type, representer)
-      # if 'yaml_multi_representers' not in cls.__dict__
-      #     cls.yaml_multi_representers = cls.yaml_multi_representers.copy()
-      cls.yaml_multi_representers[data_type] = representer
+    def self.add_representer(data_type, representer)
+      @yaml_representers ||= superclass.instance_variable_get(:@yaml_representers).dup unless self == BaseRepresenter
+      @yaml_representers[data_type] = representer
     end
 
+    def self.add_multi_representer(data_type, representer)
+      @yaml_multi_representers ||= superclass.instance_variable_get(:@yaml_multi_representers).dup unless self == BaseRepresenter
+      @yaml_multi_representers[data_type] = representer
+    end
+
+    class << self
     def represent_scalar(tag, value, style = nil, anchor = nil)
       style ||= @default_style
       comment = nil
@@ -234,9 +255,12 @@ module SweetStreetYaml
     def ignore_aliases(data)
       false
     end
+    end
   end
 
   class SafeRepresenter < BaseRepresenter
+    @yaml_multi_representers ||= superclass.instance_variable_get(:@yaml_multi_representers).dup
+    class << self
     def ignore_aliases(data)
       # https://docs.python.org/3/reference/expressions.html#parenthesized-forms
       # "i.e. two occurrences of the empty tuple may or may not yield the same object"
@@ -362,70 +386,66 @@ module SweetStreetYaml
     #     return represent_mapping(tag, state, flow_style=flow_style)
 
     def represent_undefined(data)
-      RepresenterError.new(_F('cannot represent an object: {data!s}', data=data))
+      RepresenterError.new("cannot represent an object: #{data}")
+    end
     end
   end
 
-  SafeRepresenter.add_representer(NilClass, SafeRepresenter.represent_none)
+  SafeRepresenter.add_representer(NilClass, SafeRepresenter.method(:represent_none))
 
-  SafeRepresenter.add_representer(String, SafeRepresenter.represent_str)
+  SafeRepresenter.add_representer(String, SafeRepresenter.method(:represent_str))
 
-  SafeRepresenter.add_representer(Array, SafeRepresenter.represent_binary)
+  SafeRepresenter.add_representer(Array, SafeRepresenter.method(:represent_binary))
 
-  SafeRepresenter.add_representer(TrueClass, SafeRepresenter.represent_bool)
-  SafeRepresenter.add_representer(FalseClass, SafeRepresenter.represent_bool)
+  SafeRepresenter.add_representer(TrueClass, SafeRepresenter.method(:represent_bool))
+  SafeRepresenter.add_representer(FalseClass, SafeRepresenter.method(:represent_bool))
 
-  SafeRepresenter.add_representer(Integer, SafeRepresenter.represent_int)
+  SafeRepresenter.add_representer(Integer, SafeRepresenter.method(:represent_int))
 
-  SafeRepresenter.add_representer(Float, SafeRepresenter.represent_float)
+  SafeRepresenter.add_representer(Float, SafeRepresenter.method(:represent_float))
 
-  # SafeRepresenter.add_representer(list, SafeRepresenter.represent_list)
+  # SafeRepresenter.add_representer(list, SafeRepresenter.method(:represent_list))
 
-  # SafeRepresenter.add_representer(tuple, SafeRepresenter.represent_list)
+  # SafeRepresenter.add_representer(tuple, SafeRepresenter.method(:represent_list))
 
-  SafeRepresenter.add_representer(Hash, SafeRepresenter.represent_dict)
+  SafeRepresenter.add_representer(Hash, SafeRepresenter.method(:represent_dict))
 
-  SafeRepresenter.add_representer(Set, SafeRepresenter.represent_set)
+  SafeRepresenter.add_representer(Set, SafeRepresenter.method(:represent_set))
 
-  # SafeRepresenter.add_representer(ordereddict, SafeRepresenter.represent_ordereddict)
+  # SafeRepresenter.add_representer(ordereddict, SafeRepresenter.method(:represent_ordereddict))
 
-  SafeRepresenter.add_representer(Date, SafeRepresenter.represent_date)
+  SafeRepresenter.add_representer(Date, SafeRepresenter.method(:represent_date))
 
-  SafeRepresenter.add_representer(DateTime, SafeRepresenter.represent_datetime)
+  SafeRepresenter.add_representer(DateTime, SafeRepresenter.method(:represent_datetime))
 
-  SafeRepresenter.add_representer(nil, SafeRepresenter.represent_undefined)
+  SafeRepresenter.add_representer(nil, SafeRepresenter.method(:represent_undefined))
 
 
   class Representer < SafeRepresenter
+    class << self
     def represent_complex(data)
       if data.imag == 0.0
         data = data.real.to_s
       elsif data.real == 0.0
-        # data = _F('{data_imag!r}j', data_imag=data.imag)
         data = "#{data.imag}i"
-      # elsif data.imag > 0
-        # data = _F('{data_real!r}+{data_imag!r}j', data_real=data.real, data_imag=data.imag)
-        # data = data.to_s
       else
-        # data = _F('{data_real!r}{data_imag!r}j', data_real=data.real, data_imag=data.imag)
         data = data.to_s
       end
       represent_scalar('tag:yaml.org,2002:python/complex', data)
     end
 
-    # def represent_tuple(data)
-    #     return represent_sequence('tag:yaml.org,2002:python/tuple', data)
+    def represent_tuple(data)
+      represent_sequence('tag:yaml.org,2002:python/tuple', data)
+    end
 
     def represent_name(data)
       begin
-        name = _F(
-          '{modname!s}.{qualname!s}', modname=data.__module__, qualname=data.__qualname__
-        )
+        name = "#{self.ancestors.first}"
       rescue AttributeError
         # ToDo: check if this can be reached in Py3
-        name = _F('{modname!s}.{name!s}', modname=data.__module__, name=data.__name__)
+        name = self.class.name
       end
-      represent_scalar('tag:yaml.org,2002:python/name:' + name, "")
+      represent_scalar('tag:yaml.org,2002:python/name:' + name, '')
     end
 
     def represent_module(data)
@@ -500,23 +520,24 @@ module SweetStreetYaml
     #     if dictitems
     #         value['dictitems'] = dictitems
     #     return represent_mapping(tag + function_name, value)
+    end
+  end
 
+  Representer.add_representer(Complex, Representer.method(:represent_complex))
 
-  Representer.add_representer(Complex, Representer.represent_complex)
+  Representer.add_representer(Array, Representer.method(:represent_tuple))
 
-  Representer.add_representer(Array, Representer.represent_tuple)
+  Representer.add_representer(Class, Representer.method(:represent_name))
 
-  Representer.add_representer(Class, Representer.represent_name)
+  Representer.add_representer(Method, Representer.method(:represent_name))
 
-  Representer.add_representer(Method, Representer.represent_name)
+  # Representer.add_representer(types.BuiltinFunctionType, Representer.method(:represent_name))
 
-  # Representer.add_representer(types.BuiltinFunctionType, Representer.represent_name)
+  Representer.add_representer(Module, Representer.method(:represent_module))
 
-  Representer.add_representer(Module, Representer.represent_module)
+  # Representer.add_multi_representer(Object, Representer.method(:represent_object))
 
-  Representer.add_multi_representer(Object, Representer.represent_object)
-
-  Representer.add_multi_representer(Class, Representer.represent_name)
+  Representer.add_multi_representer(Class, Representer.method(:represent_name))
 
 
   class RoundTripRepresenter < SafeRepresenter
@@ -530,6 +551,7 @@ module SweetStreetYaml
       super
     end
 
+    class << self
     def ignore_aliases(data)
       begin
         return false if data.anchor&.value
@@ -638,7 +660,7 @@ module SweetStreetYaml
     def represent_hex_caps_int(data)
       s = sprintf("%0#{data._width}X", data)
       anchor = data.yaml_anchor(:any => true)
-      insert_underscore('0x', s, data._underscore, anchor:=> anchor)
+      insert_underscore('0x', s, data._underscore, :anchor => anchor)
     end
 
     def represent_scalar_float(data)
@@ -753,7 +775,7 @@ module SweetStreetYaml
         item_comments = comment.items
         if node.comment
           # as we are potentially going to extend this, make a new list
-          node.comment = comment.comment[:]
+          node.comment = comment.comment.dup
         else
           node.comment = comment.comment
         end
@@ -786,7 +808,7 @@ module SweetStreetYaml
         return node
       end
       if node.comment
-        comments.each_with_index do |idx, val
+        comments.each_with_index do |idx, val|
           next if idx >= node.comment.size
 
           nc = node.comment[idx]
@@ -907,7 +929,7 @@ module SweetStreetYaml
           arg = represent_data(merge_list)
           arg.flow_style = true
         end
-        value.insert(merge_pos, (ScalarNode.new('tag:yaml.org,2002:merge', '<<'), arg))
+        value.insert(merge_pos, ScalarNode.new('tag:yaml.org,2002:merge', '<<'), arg)
       end
       node
     end
@@ -1033,7 +1055,7 @@ module SweetStreetYaml
         node_key.style = node_value.style = '?'
         best_style = false if !node_key.instance_of?(ScalarNode) && !node_key.style
         best_style = false if !node_value.instance_of?(ScalarNode) && !node_value.style
-        value.append((node_key, node_value))
+        value.append([node_key, node_value])
       end
       self.best_style = best_style
       node
@@ -1124,46 +1146,48 @@ module SweetStreetYaml
     #     return res
 
   end
+  end
 
-  RoundTripRepresenter.add_representer(NilClass, RoundTripRepresenter.represent_none)
+  RoundTripRepresenter.add_representer(NilClass, RoundTripRepresenter.method(:represent_none))
 
-  RoundTripRepresenter.add_representer(LiteralScalarString, RoundTripRepresenter.represent_literal_scalarstring)
+  RoundTripRepresenter.add_representer(LiteralScalarString, RoundTripRepresenter.method(:represent_literal_scalarstring))
 
-  RoundTripRepresenter.add_representer(FoldedScalarString, RoundTripRepresenter.represent_folded_scalarstring)
+  RoundTripRepresenter.add_representer(FoldedScalarString, RoundTripRepresenter.method(:represent_folded_scalarstring))
 
-  RoundTripRepresenter.add_representer(SingleQuotedScalarString, RoundTripRepresenter.represent_single_quoted_scalarstring)
+  RoundTripRepresenter.add_representer(SingleQuotedScalarString, RoundTripRepresenter.method(:represent_single_quoted_scalarstring))
 
-  RoundTripRepresenter.add_representer(DoubleQuotedScalarString, RoundTripRepresenter.represent_double_quoted_scalarstring)
+  RoundTripRepresenter.add_representer(DoubleQuotedScalarString, RoundTripRepresenter.method(:represent_double_quoted_scalarstring))
 
-  RoundTripRepresenter.add_representer(PlainScalarString, RoundTripRepresenter.represent_plain_scalarstring)
+  RoundTripRepresenter.add_representer(PlainScalarString, RoundTripRepresenter.method(:represent_plain_scalarstring))
 
-  # RoundTripRepresenter.add_representer(tuple, Representer.represent_tuple)
+  # RoundTripRepresenter.add_representer(tuple, Representer.represent_tuple))
 
-  RoundTripRepresenter.add_representer(ScalarInt, RoundTripRepresenter.represent_scalar_int)
+  RoundTripRepresenter.add_representer(ScalarInt, RoundTripRepresenter.method(:represent_scalar_int))
 
-  RoundTripRepresenter.add_representer(BinaryInt, RoundTripRepresenter.represent_binary_int)
+  RoundTripRepresenter.add_representer(BinaryInt, RoundTripRepresenter.method(:represent_binary_int))
 
-  RoundTripRepresenter.add_representer(OctalInt, RoundTripRepresenter.represent_octal_int)
+  RoundTripRepresenter.add_representer(OctalInt, RoundTripRepresenter.method(:represent_octal_int))
 
-  RoundTripRepresenter.add_representer(HexInt, RoundTripRepresenter.represent_hex_int)
+  RoundTripRepresenter.add_representer(HexInt, RoundTripRepresenter.method(:represent_hex_int))
 
-  RoundTripRepresenter.add_representer(HexCapsInt, RoundTripRepresenter.represent_hex_caps_int)
+  RoundTripRepresenter.add_representer(HexCapsInt, RoundTripRepresenter.method(:represent_hex_caps_int))
 
-  RoundTripRepresenter.add_representer(ScalarFloat, RoundTripRepresenter.represent_scalar_float)
+  RoundTripRepresenter.add_representer(ScalarFloat, RoundTripRepresenter.method(:represent_scalar_float))
 
-  RoundTripRepresenter.add_representer(ScalarBoolean, RoundTripRepresenter.represent_scalar_bool)
+  # RoundTripRepresenter.add_representer(ScalarBoolean, RoundTripRepresenter.method(:represent_scalar_bool)) # WTF: uninitialized constant SweetStreetYaml::ScalarBoolean
 
-  RoundTripRepresenter.add_representer(CommentedSeq, RoundTripRepresenter.represent_list)
+  RoundTripRepresenter.add_representer(CommentedSeq, RoundTripRepresenter.method(:represent_list))
 
-  RoundTripRepresenter.add_representer(CommentedMap, RoundTripRepresenter.represent_dict)
+  RoundTripRepresenter.add_representer(CommentedMap, RoundTripRepresenter.method(:represent_dict))
 
-  RoundTripRepresenter.add_representer(CommentedOrderedMap, RoundTripRepresenter.represent_ordereddict)
+  RoundTripRepresenter.add_representer(CommentedOrderedMap, RoundTripRepresenter.method(:represent_ordereddict))
 
-  RoundTripRepresenter.add_representer(collections.OrderedDict, RoundTripRepresenter.represent_ordereddict)
+  # RoundTripRepresenter.add_representer(collections.OrderedDict, RoundTripRepresenter.method(:represent_ordereddict))
+  RoundTripRepresenter.add_representer(Hash, RoundTripRepresenter.method(:represent_ordereddict))
 
-  RoundTripRepresenter.add_representer(CommentedSet, RoundTripRepresenter.represent_set)
+  RoundTripRepresenter.add_representer(CommentedSet, RoundTripRepresenter.method(:represent_set))
 
-  RoundTripRepresenter.add_representer(TaggedScalar, RoundTripRepresenter.represent_tagged_scalar)
+  RoundTripRepresenter.add_representer(TaggedScalar, RoundTripRepresenter.method(:represent_tagged_scalar))
 
-  RoundTripRepresenter.add_representer(TimeStamp, RoundTripRepresenter.represent_datetime)
+  RoundTripRepresenter.add_representer(TimeStamp, RoundTripRepresenter.method(:represent_datetime))
 end

@@ -15,9 +15,9 @@
 # from ruamel.yaml.compat import _F, nprint, dbg, DBG_EVENT, \
 #     check_anchorname_char, nprintf  # NOQA
 
-require 'compat'
-require 'error'
-require 'events'
+require_relative './compat'
+require_relative './error'
+require_relative './events'
 
 module SweetStreetYaml
   class EmitterError < YAMLError
@@ -209,14 +209,14 @@ module SweetStreetYaml
     def stream=(val)
       return unless val
 
-      raise YAMLStreamError.new('stream argument needs to have a write() method') unless val.instance_variable_get:@write)
+      raise YAMLStreamError.new('stream argument needs to have a write() method') unless val.instance_variable_get(:@write)
 
       @_stream = val
     end
 
     def serializer
       begin
-        return @dumper.serializer if hasattr(dumper.instance_variable_get(:typ)
+        return @dumper.serializer if @dumper.instance_variable_get(:@typ)
 
         return @dumper._serializer
       rescue AttributeError
@@ -301,14 +301,14 @@ module SweetStreetYaml
         @state = expect_first_document_start
       else
         raise EmitterError.new(
-          _F('expected StreamStartEvent, but got {self_event!s}', self_event=event)
+          "expected StreamStartEvent, but got #{event}"
         )
       end
     end
 
     def expect_nothing
       raise EmitterError.new(
-        _F('expected nothing, but got {self_event!s}', self_event=event)
+        "expected nothing, but got #{event}"
       )
     end
 
@@ -360,10 +360,7 @@ module SweetStreetYaml
         @state = expect_nothing
       else
         raise EmitterError.new(
-          _F(
-            'expected DocumentStartEvent, but got {self_event!s}',
-            self_event=event,
-            )
+            "expected DocumentStartEvent, but got #{event}"
         )
       end
     end
@@ -379,7 +376,7 @@ module SweetStreetYaml
         @state = expect_document_start
       else
         raise EmitterError.new(
-          _F('expected DocumentEndEvent, but got {self_event!s}', self_event=event)
+          "expected DocumentEndEvent, but got #{event}"
         )
       end
     end
@@ -464,7 +461,7 @@ module SweetStreetYaml
           end
         else
           raise EmitterError.new(
-            _F('expected NodeEvent, but got {self_event!s}', self_event=event)
+            "expected NodeEvent, but got #{event}"
           )
       end
     end
@@ -627,7 +624,7 @@ module SweetStreetYaml
 
     def expect_flow_mapping_value
       write_indent if @canonical || @column > @best_width
-      write_indicator@prefixed_colon, true)
+      write_indicator(@prefixed_colon, true)
       @states.append(expect_flow_mapping_key)
       expect_node(:mapping => true)
     end
@@ -693,7 +690,7 @@ module SweetStreetYaml
             if !@event.instance_of?(SequenceStartEvent) && !@event.instance_of?(MappingStartEvent) # sequence keys
               begin
                 write_indicator('?', true, :indention => true) if event.style == '?'
-              rescue AttributeError:  # aliases have no style
+              rescue AttributeError  # aliases have no style
               end
               @states.append(expect_block_mapping_simple_value)
               expect_node(:mapping => true, :simple_key =>true)
@@ -837,11 +834,11 @@ module SweetStreetYaml
 
       if (!@event.style || @event.style == '?') &&
         (@event.implicit[0] || !@event.implicit[2])
-        if ! (
+        if !(
         @simple_key_context && (@analysis.empty || @analysis.multiline)
         ) && (
-        @flow_level
-        && @analysis.allow_flow_plain || (!@flow_level && @analysis.allow_block_plain)
+          @flow_level &&
+          @analysis.allow_flow_plain || (!@flow_level && @analysis.allow_block_plain)
         )
           return ''
         end
@@ -895,13 +892,13 @@ module SweetStreetYaml
     # Analyzers.
 
     def prepare_version(version)
-        major, minor = version
+        major = version.segments.first
         if major != 1
             raise EmitterError.new(
-                _F('unsupported YAML version: {major:d}.{minor:d}', major=major, minor=minor)
+                "unsupported YAML version: #{version}"
             )
         end
-        _F('{major:d}.{minor:d}', major=major, minor=minor)
+        "#{version}"
     end
 
     def prepare_tag_handle(handle)
@@ -909,16 +906,12 @@ module SweetStreetYaml
 
       if handle[0] != '!' || handle[-1] != '!'
         raise EmitterError.new(
-          _F("tag handle must start && end with '!': {handle!r}", handle=handle)
+          "tag handle must start and end with '!': #{handle}"
         )
       end
       unless /(\w|-)+/.match?(handle[1..-1])
         raise EmitterError.new(
-          _F(
-            'invalid character {ch!r} in the tag handle: {handle!r}',
-            ch=ch,
-            handle=handle,
-            )
+            "invalid character {ch!r} in the tag handle: #{handle}"
         )
       end
       handle
@@ -946,7 +939,7 @@ module SweetStreetYaml
           the_end += 1
           start = the_end
           data = ch
-          data.each { |ch| chunks.append(_F('%{ord_ch:02X}', :ord_ch => ch.ord)) }
+          data.each { |ch| chunks.append(sprintf('%%02X', ch.ord)) }
         end
         chunks.append(prefix[start..the_end]) if start < the_end
         chunks.join
@@ -984,15 +977,15 @@ module SweetStreetYaml
           the_end += 1
           start = the_end
           data = ch
-          data.each { |ch| chunks.append(_F('%{ord_ch:02X}', :ord_ch => ch.ord)) }
+          data.each { |ch| chunks.append(sprintf('%%02X', ch.ord)) }
         end
       end
       chunks.append(suffix[start..the_end]) if start < the_end
       suffix_text = chunks.join
       if handle
-        return _F('{handle!s}{suffix_text!s}', handle=handle, suffix_text=suffix_text)
+        return "#{handle}#{suffix_text}"
       else
-        return _F('!<{suffix_text!s}>', suffix_text=suffix_text)
+        return "!<#{suffix_text}>"
       end
     end
 
@@ -1045,7 +1038,7 @@ module SweetStreetYaml
       preceded_by_whitespace = true
 
       # Last character || followed by a whitespace.
-      followed_by_whitespace = scalar.size == 1 || "\0 \t\r\n\x85\u2028\u2029".include?(scalar[1])
+      followed_by_whitespace = scalar.size == 1 || "\0 \t\r\n\u{9b}\u2028\u2029".include?(scalar[1])
 
       # The previous character is a space.
       previous_space = false
@@ -1080,12 +1073,12 @@ module SweetStreetYaml
         end
 
         # Check for line breaks, special, && unicode characters.
-        line_breaks = true if "\n\x85\u2028\u2029".include?(ch)
+        line_breaks = true if "\n\u{9b}\u2028\u2029".include?(ch)
         unless (ch == "\n" || (("\x20" <= ch) && (ch <= "\x7E")))
           if (ch != "\uFEFF") &&
             (
-            ch == "\x85" ||
-              (("\xA0" <= ch) && (ch <= "\uD7FF")) ||
+            ch == "\u{9b}" ||
+              (("\u{A0}" <= ch) && (ch <= "\uD7FF")) ||
               (("\uE000" <= ch) && (ch <= "\uFFFD")) ||
               (@unicode_supplementary && (("\U00010000" <= ch) && (ch <= "\U0010FFFF")))
             )
@@ -1103,7 +1096,7 @@ module SweetStreetYaml
           break_space = true if previous_break
           previous_space = true
           previous_break = false
-        elsif "\n\x85\u2028\u2029".include?(ch)
+        elsif "\n\u{9b}\u2028\u2029".include?(ch)
           leading_break = true if index == 0
           trailing_break = true if index == scalar.size - 1
           space_break = true if previous_space
@@ -1116,8 +1109,8 @@ module SweetStreetYaml
 
         # Prepare for the next character.
         index += 1
-        preceded_by_whitespace = "\0 \t\r\n\x85\u2028\u2029".include?(ch)
-        followed_by_whitespace = index + 1 >= scalar.size || "\0 \t\r\n\x85\u2028\u2029".include?(scalar[index + 1])
+        preceded_by_whitespace = "\0 \t\r\n\u{9b}\u2028\u2029".include?(ch)
+        followed_by_whitespace = index + 1 >= scalar.size || "\0 \t\r\n\u{9b}\u2028\u2029".include?(scalar[index + 1])
       end
 
 
@@ -1216,9 +1209,9 @@ module SweetStreetYaml
     def write_indent
       indent = @indent || 0
       if (
-      !@indention
-      || @column > indent
-      || (@column == indent && !@whitespace)
+        !@indention ||
+        @column > indent ||
+        (@column == indent && !@whitespace)
       )
         if @no_newline
           @no_newline = false
@@ -1246,18 +1239,14 @@ module SweetStreetYaml
     end
 
     def write_version_directive(version_text)
-      data = _F('%YAML {version_text!s}', :version_text => version_text)
+      data = "%YAML #{version_text}"
       data = data.encode(@encoding) if @encoding
       @stream.write(data)
       write_line_break
     end
 
     def write_tag_directive(handle_text, prefix_text)
-      data = _F(
-        '%TAG {handle_text!s} {prefix_text!s}',
-        handle_text=handle_text,
-        prefix_text=prefix_text,
-        )
+      data = "%TAG #{handle_text} #{prefix_text}"
       data = data.encode(@encoding) if @encoding
       @stream.write(data)
       write_line_break
@@ -1292,7 +1281,7 @@ module SweetStreetYaml
             end
             start = the_end
           elsif breaks
-            if ch.nil? || "\n\x85\u2028\u2029".include?(ch)
+            if ch.nil? || "\n\u{9b}\u2028\u2029".include?(ch)
               write_line_break if text[start] == "\n"
             end
             text[start..the_end].each do |br|
@@ -1305,7 +1294,7 @@ module SweetStreetYaml
             write_indent
             start = the_end
           else
-            if ch.nil? || ch == "'" || " \n\x85\u2028\u2029".include?(ch)
+            if ch.nil? || ch == "'" || " \n\u{9b}\u2028\u2029".include?(ch)
               if start < the_end
                 data = text[start..the_end]
                 column += data.size
@@ -1324,7 +1313,7 @@ module SweetStreetYaml
           end
           if ch
             spaces = ch == ' '
-            breaks = "\n\x85\u2028\u2029".include?(ch)
+            breaks = "\n\u{9b}\u2028\u2029".include?(ch)
             the_end += 1
           end
         end
@@ -1344,8 +1333,8 @@ module SweetStreetYaml
         "\x1B" => 'e',
         '"' => '"',
         "\\" => '\\',
-        "\x85" => 'N',
-        "\xA0" => '_',
+        "\u{9b}" => 'N',
+        "\u{A0}" => '_',
         "\u2028" => 'L',
         "\u2029" => 'P',
     }.freeze
@@ -1369,7 +1358,7 @@ module SweetStreetYaml
         ("\x20" <= ch) && (ch <= "\x7E") ||
           (
           @allow_unicode &&
-            (("\xA0" <= ch && ch <= "\uD7FF") || ("\uE000" <= ch && ch <= "\uFFFD"))
+            (("\u{A0}" <= ch && ch <= "\uD7FF") || ("\uE000" <= ch && ch <= "\uFFFD"))
           )
         )
       )
@@ -1384,11 +1373,11 @@ module SweetStreetYaml
           if ESCAPE_REPLACEMENTS.has_key?(ch)
             data = '\\' + ESCAPE_REPLACEMENTS[ch]
           elsif ch <= "\xFF"
-            data = _F('\\x{ord_ch:02X}', :ord_ch => ch.ord)
+            data = '\\x' + sprintf('%02X', ch.ord)
           elsif ch <= "\uFFFF"
-            data = _F('\\u{ord_ch:04X}', :ord_ch => ch.ord)
+            data = '\\u' + sprintf('%04X', ch.ord)
           else
-            data = _F('\\U{ord_ch:08X}', :ord_ch => ch.ord)
+            data = '\\u' + sprintf('%08X', ch.ord)
           end
           @column += data.size
           data = data.encode(@encoding) if @encoding.to_boolean
@@ -1428,7 +1417,7 @@ module SweetStreetYaml
     indicator = ''
     hints = ''
     if text
-      if " \n\x85\u2028\u2029".include?(text[0])
+      if " \n\u{9b} \u2028\u2029".include?(text[0])
         indent = @sequence_dash_offset
         hints += indent.to_s
       elsif @root_context
@@ -1447,9 +1436,9 @@ module SweetStreetYaml
         end
         indent = @sequence_dash_offset if pos > 0
       end
-      if !"\n\x85\u2028\u2029".include?(text[-1])
+      if !"\n\u{9b}\u2028\u2029".include?(text[-1])
         indicator = '-'
-      elsif text.size == 1 || "\n\x85\u2028\u2029".include?(text[-2])
+      elsif text.size == 1 || "\n\u{9b}\u2028\u2029".include?(text[-2])
         indicator = '+'
       end
     end
@@ -1470,7 +1459,7 @@ module SweetStreetYaml
       ch = nil
       ch = text[the_end] if the_end < text.size
       if breaks
-        if ch.nil? || !"\n\x85\u2028\u2029\a".include?(ch)
+        if ch.nil? || !"\n\u{9b}\u2028\u2029\a".include?(ch)
           write_line_break if !leading_space && ch && ch != ' ' && text[start] == "\n"
           leading_space = ch == ' '
           text[start..the_end].each do |br|
@@ -1496,7 +1485,7 @@ module SweetStreetYaml
           start = the_end
         end
       else
-        if ch.nil? || " \n\x85\u2028\u2029\a".include?(ch)
+        if ch.nil? || " \n\u{9b}\u2028\u2029\a".include?(ch)
           data = text[start..the_end]
           @column += data.size
           data = data.encode(@encoding) if @encoding.to_boolean
@@ -1515,7 +1504,7 @@ module SweetStreetYaml
         end
       end
       if ch
-        breaks = "\n\x85\u2028\u2029".include?(ch)
+        breaks = "\n\u{9b}\u2028\u2029".include?(ch)
         spaces = ch == ' '
       end
       the_end += 1
@@ -1534,7 +1523,7 @@ module SweetStreetYaml
         ch = nil
         ch = text[the_end] if the_end < text.size
         if breaks
-          if ch.nil? || !"\n\x85\u2028\u2029".include?(ch)
+          if ch.nil? || !"\n\u{9b}\u2028\u2029".include?(ch)
             text[start..the_end].each do |br|
               if br == "\n"
                 write_line_break
@@ -1553,7 +1542,7 @@ module SweetStreetYaml
             start = the_end
           end
         else
-          if ch.nil? || "\n\x85\u2028\u2029".include?(ch)
+          if ch.nil? || "\n\u{9b}\u2028\u2029".include?(ch)
             data = text[start..the_end]
             data = data.encode(@encoding) if @encoding.to_boolean
             @stream.write(data)
@@ -1561,7 +1550,7 @@ module SweetStreetYaml
             start = the_end
           end
         end
-        breaks = "\n\x85\u2028\u2029".include?(ch) if ch
+        breaks = "\n\u{9b}\u2028\u2029".include?(ch) if ch
         the_end += 1
       end
     end
@@ -1605,7 +1594,7 @@ module SweetStreetYaml
             end
             start = the_end
           elsif breaks
-            unless "\n\x85\u2028\u2029".include?(ch)
+            unless "\n\u{9b}\u2028\u2029".include?(ch)
               write_line_break if text[start] == "\n"
               text[start..the_end].each do |br|
                 if br == "\n"
@@ -1620,7 +1609,7 @@ module SweetStreetYaml
               start = the_end
             end
           else
-            if ch.nil? || " \n\x85\u2028\u2029".include?(ch)
+            if ch.nil? || " \n\u{9b}\u2028\u2029".include?(ch)
               data = text[start..the_end]
               @column += data.size
               data = data.encode(@encoding) if @encoding
@@ -1635,7 +1624,7 @@ module SweetStreetYaml
           end
           if ch
             spaces = ch == ' '
-            breaks = "\n\x85\u2028\u2029".include?(ch)
+            breaks = "\n\u{9b}\u2028\u2029".include?(ch)
           end
           the_end += 1
         end
@@ -1657,7 +1646,7 @@ module SweetStreetYaml
           raise ValueError
         end
       rescue ValueError
-        col =@ column + 1
+        col = @column + 1
       end
       begin
         # at least one space if the current column >= the start column of the comment

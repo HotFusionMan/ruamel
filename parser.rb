@@ -71,12 +71,13 @@
 # flow_mapping_entry: { ALIAS ANCHOR TAG SCALAR FLOW-SEQUENCE-START
 #                                                    FLOW-MAPPING-START KEY }
 
-require 'error' # MarkedYAMLError
-require 'tokens'
-require 'events'
-require 'scanner' # Scanner, RoundTripScanner, ScannerError BlankLineComment
-require 'comments' # C_PRE, C_POST, C_SPLIT_ON_FIRST_BLANK
-require 'compat' # _F, nprint, nprintf
+require_relative './sweet_street_yaml'
+require_relative './error' # MarkedYAMLError
+require_relative './tokens'
+require_relative './events'
+require_relative './scanner' # Scanner, RoundTripScanner, ScannerError BlankLineComment
+require_relative './comments' # C_PRE, C_POST, C_SPLIT_ON_FIRST_BLANK
+# require_relative './compat' # _F, nprint, nprintf
 
 
 module SweetStreetYaml
@@ -491,7 +492,7 @@ module SweetStreetYaml
         end_mark = pt.start_mark
         comment = pt.comment
         event = MappingStartEvent.new(anchor, tag, implicit, :start_mark => start_mark, :end_mark => end_mark, :flow_style => alse, :comment => comment)
-        @.state = parse_block_mapping_first_key
+        @state = parse_block_mapping_first_key
       elsif anchor || tag
         # Empty scalars are allowed even if a tag or an anchor is specified.
         event = ScalarEvent.new(anchor, tag, [implicit, false], '', :start_mark => start_mark, :end_mark => end_mark)

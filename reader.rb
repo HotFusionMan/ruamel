@@ -22,12 +22,14 @@
 #      character.
 
 
-require 'error'
-require 'compat'
-require 'util'
+require_relative './error'
+require_relative './compat'
+require_relative './util'
 
 module SweetStreetYaml
   class ReaderError < YAMLError
+    attr_reader :character
+
     def initialize(name, position, character, encoding, reason)
       @name = name
       @character = character
@@ -37,26 +39,10 @@ module SweetStreetYaml
     end
 
     def to_str
-      if isinstance(@character, bytes)
-        return _F(
-          "'{self_encoding!s}' codec can't decode byte #x{ord_self_character:02x}: "
-        '{self_reason!s}\n'
-        '  in "{self_name!s}", position {self_position:d}',
-          self_encoding=encoding,
-            ord_self_character=ord(character),
-            self_reason=reason,
-            self_name=name,
-            self_position=position,
-        )
+      if @character.instance_of?(bytes)
+        "'#{encoding}' codec can't decode byte x#{character.ord}: '#{reason}\n'  in '#{name}', position #{position}"
       else
-        return _F(
-          'unacceptable character #x{self_character:04x}: {self_reason!s}\n'
-        '  in "{self_name!s}", position {self_position:d}',
-          self_character=character,
-            self_reason=reason,
-            self_name=name,
-            self_position=position,
-        )
+        "unacceptable character x#{character}: #{reason}\n  in '#{name}', position #{position}"
       end
     end
   end
@@ -76,7 +62,7 @@ module SweetStreetYaml
 
     # Yeah, it's ugly and slow.
 
-    NON_PRINTABLE = Regexp.new("[^\x09\x0A\x0D\x20-\x7E\x85\xA0-\uD7FF\uE000-\uFFFD\U00010000-\U0010FFFF]")
+    NON_PRINTABLE = Regexp.new("[^\x09\x0A\x0D\x20-\x7E\u{9b}\u{A0}-\uD7FF\uE000-\uFFFD\U00010000-\U0010FFFF]")
 
     def initialize(stream, loader = nil)
       @loader = loader
@@ -141,7 +127,7 @@ module SweetStreetYaml
 
     def prefix(length = 1)
       update(length) if @pointer + length >= @buffer.size
-      @buffer[@pointer...(@pointer + length])]
+      @buffer[@pointer...(@pointer + length)]
     end
 
     def forward_1_1(length = 1)
@@ -150,7 +136,7 @@ module SweetStreetYaml
         ch = @buffer[@pointer]
         @pointer += 1
         @index += 1
-        if "\n\x85\u2028\u2029".include?(ch) || (ch == "\r" && @buffer[@pointer] != "\n")
+        if "\n\u{9b}\u2028\u2029".include?(ch) || (ch == "\r" && @buffer[@pointer] != "\n")
           @line += 1
           @column = 0
         elsif ch != "\uFEFF"

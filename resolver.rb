@@ -9,10 +9,10 @@
 # from ruamel.yaml.nodes import MappingNode, ScalarNode, SequenceNode  # NOQA
 # from ruamel.yaml.util import RegExp  # NOQA
 
-require 'compat'
-require 'error'
-require 'nodes'
-require 'util'
+require_relative './compat'
+require_relative './error'
+require_relative './nodes'
+require_relative './util'
 
 module SweetStreetYaml
   # resolvers consist of
@@ -24,13 +24,11 @@ module SweetStreetYaml
     [[VERSION_1_2],
       'tag:yaml.org,2002:bool',
       Regexp.new("'^(?:true|True|TRUE|false|False|FALSE)$'", Regexp::EXTENDED),
-      SweetStreetYaml.list('tTfF')],
+      SweetStreetYaml::Util.list('tTfF')],
     [[VERSION_1_1],
       'tag:yaml.org,2002:bool',
-      Regexp.new("'^^(?:y|Y|yes|Yes|YES|n|N|no|No|NO
-        |true|True|TRUE|false|False|FALSE
-        |on|On|ON|off|Off|OFF)$'", Regexp.new::EXTENDED),
-      SweetStreetYaml.list('yYnNtTfFoO')],
+      Regexp.new("'^^(?:y|Y|yes|Yes|YES|n|N|no|No|NO|true|True|TRUE|false|False|FALSE|on|On|ON|off|Off|OFF)$'", Regexp::EXTENDED),
+      SweetStreetYaml::Util.list('yYnNtTfFoO')],
     [[VERSION_1_2],
       'tag:yaml.org,2002:float',
       Regexp.new("'^(?:
@@ -38,8 +36,8 @@ module SweetStreetYaml
         |[-+]?(?:[0-9][0-9_]*)(?:[eE][-+]?[0-9]+)
         |[-+]?\\.[0-9_]+(?:[eE][-+][0-9]+)?
         |[-+]?\\.(?:inf|Inf|INF)
-        |\\.(?:nan|NaN|NAN))$'", Regexp.new::EXTENDED),
-      SweetStreetYaml.list('-+0123456789.')],
+        |\\.(?:nan|NaN|NAN))$'", Regexp::EXTENDED),
+      SweetStreetYaml::Util.list('-+0123456789.')],
     [[VERSION_1_1],
       'tag:yaml.org,2002:float',
       Regexp.new("'^(?:
@@ -48,23 +46,23 @@ module SweetStreetYaml
         |\\.[0-9_]+(?:[eE][-+][0-9]+)?
         |[-+]?[0-9][0-9_]*(?::[0-5]?[0-9])+\\.[0-9_]*  # sexagesimal float
         |[-+]?\\.(?:inf|Inf|INF)
-        |\\.(?:nan|NaN|NAN))$'", Regexp.new::EXTENDED),
-      SweetStreetYaml.list('-+0123456789.')],
+        |\\.(?:nan|NaN|NAN))$'", Regexp::EXTENDED),
+      SweetStreetYaml::Util.list('-+0123456789.')],
     [[VERSION_1_2],
       'tag:yaml.org,2002:int',
       Regexp.new("'^(?:[-+]?0b[0-1_]+
         |[-+]?0o?[0-7_]+
         |[-+]?[0-9_]+
-        |[-+]?0x[0-9a-fA-F_]+)$'", Regexp.new::EXTENDED),
-      SweetStreetYaml.list('-+0123456789')],
+        |[-+]?0x[0-9a-fA-F_]+)$'", Regexp::EXTENDED),
+      SweetStreetYaml::Util.list('-+0123456789')],
     [[VERSION_1_1],
       'tag:yaml.org,2002:int',
       Regexp.new("'^(?:[-+]?0b[0-1_]+
         |[-+]?0?[0-7_]+
         |[-+]?(?:0|[1-9][0-9_]*)
         |[-+]?0x[0-9a-fA-F_]+
-        |[-+]?[1-9][0-9_]*(?::[0-5]?[0-9])+)$'", Regexp.new::EXTENDED),  # sexagesimal int
-      SweetStreetYaml.list('-+0123456789')],
+        |[-+]?[1-9][0-9_]*(?::[0-5]?[0-9])+)$'", Regexp::EXTENDED),  # sexagesimal int
+      SweetStreetYaml::Util.list('-+0123456789')],
     [[VERSION_1_2, VERSION_1_1],
       'tag:yaml.org,2002:merge',
       Regexp.new('^[?:<<]$'),
@@ -73,7 +71,7 @@ module SweetStreetYaml
       'tag:yaml.org,2002:null',
       Regexp.new("'^(?: ~
         |null|Null|NULL
-        | )$'", Regexp.new::EXTENDED),
+        | )$'", Regexp::EXTENDED),
       ['~', 'n', 'N', '']],
     [[VERSION_1_2, VERSION_1_1],
       'tag:yaml.org,2002:timestamp',
@@ -81,8 +79,8 @@ module SweetStreetYaml
         |[0-9][0-9][0-9][0-9] -[0-9][0-9]? -[0-9][0-9]?
         (?:[Tt]|[ \\t]+)[0-9][0-9]?
         :[0-9][0-9] :[0-9][0-9] (?:\\.[0-9]*)?
-        (?:[ \\t]*(?:Z|[-+][0-9][0-9]?(?::[0-9][0-9])?))?)$'", Regexp.new::EXTENDED),
-      SweetStreetYaml.list('0123456789')],
+        (?:[ \\t]*(?:Z|[-+][0-9][0-9]?(?::[0-9][0-9])?))?)$'", Regexp::EXTENDED),
+      SweetStreetYaml::Util.list('0123456789')],
     [[VERSION_1_2, VERSION_1_1],
       'tag:yaml.org,2002:value',
       Regexp.new('^(?:=)$'),
@@ -92,7 +90,7 @@ module SweetStreetYaml
     [[VERSION_1_2, VERSION_1_1],
       'tag:yaml.org,2002:yaml',
       Regexp.new('^(?:!|&|\\*)$'),
-      SweetStreetYaml.list('!&*')]
+      SweetStreetYaml::Util.list('!&*')]
   ].freeze
 
 
@@ -105,8 +103,10 @@ module SweetStreetYaml
     DEFAULT_SEQUENCE_TAG = 'tag:yaml.org,2002:seq'
     DEFAULT_MAPPING_TAG = 'tag:yaml.org,2002:map'
 
-    class_attribute :yaml_implicit_resolvers
-    class_attribute :yaml_path_resolvers
+    class << self
+      attr_accessor :yaml_implicit_resolvers
+      attr_accessor :yaml_path_resolvers
+    end
     @yaml_implicit_resolvers = {}
     @yaml_path_resolvers = {}
 

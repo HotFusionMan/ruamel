@@ -35,18 +35,17 @@
 # from ruamel.yaml.loader import Loader as UnsafeLoader
 # from ruamel.yaml.comments import CommentedMap, CommentedSeq, C_PRE
 
-require 'error'
-require 'tokens'
-require 'events'
-require 'nodes'
-require 'loader'
-require 'dumper'
-require 'resolver'
-require 'representer'
-require 'constructor'
-require 'compat'
+require_relative './error'
+require_relative './tokens'
+require_relative './events'
+require_relative './nodes'
+require_relative './loader'
+require_relative './dumper'
+require_relative './resolver'
+require_relative './representer'
+require_relative './constructor'
+# require_relative './compat'
 
-UnsafeLoader = Loader
 
 
 # YAML is an acronym, i.e. spoken: rhymes with "camel". And thus a
@@ -54,6 +53,8 @@ UnsafeLoader = Loader
 
 
 module SweetStreetYaml
+  UnsafeLoader = Loader
+
   class YAML
     def initialize(*, typ: nil, pure: true)#, output: nil, plug_ins: nil)  # input: nil,
       # typ: 'rt'/nil -> RoundTripLoader/RoundTripDumper,  (default)
@@ -569,7 +570,7 @@ module SweetStreetYaml
 
 
         # C routines
-    class XDumper(representer, rslvr) # TODO: translate Python multiple inheritance to mixin modules
+    class XDumper#(representer, rslvr) # TODO: translate Python multiple inheritance to mixin modules
       def initialize(
         selfx,
         stream,
@@ -1083,52 +1084,53 @@ enc = nil
 #             RoundTripRepresenter.add_multi_representer(data_type, multi_representer)
 #         else
 #             raise NotImplementedError
+  end
 
-
-# TODO:  Figure out whether the following two classes could be turned into Ruby that would serve the same purpose,
-# viz., allow a class to declare a class that inherits from YAMLObject, thereby allowing the class to be dumped
-# to YAML and loaded/parsed from YAML.
-class YAMLObjectMetaclass(type)
-    """
-    The metaclass for YAMLObject.
-    """
+  # TODO:  Figure out whether the following two classes could be turned into Ruby that would serve the same purpose,
+  # viz., allow a class to declare a class that inherits from YAMLObject, thereby allowing the class to be dumped
+  # to YAML and loaded/parsed from YAML.
+  class YAMLObjectMetaclass#(type)
+    "
+      The metaclass for YAMLObject.
+      "
 
     def initialize(cls, name, bases, kwds)
-        # type: (Any, Any, Any) -> nil
-        super().__init__(name, bases, kwds)
-        if 'yaml_tag' in kwds && kwds['yaml_tag'] !.nil?
-            cls.yaml_constructor.add_constructor(cls.yaml_tag, cls.from_yaml)  # type: ignore
-            cls.yaml_representer.add_representer(cls, cls.to_yaml)  # type: ignore
+      super(name, bases, kwds)
+      if kwds.has_key?('yaml_tag') && kwds['yaml_tag']
+        cls.yaml_constructor.add_constructor(cls.yaml_tag, cls.from_yaml)
+        cls.yaml_representer.add_representer(cls, cls.to_yaml)
+      end
+    end
+  end
 
-
-class YAMLObject(with_metaclass(YAMLObjectMetaclass)):  # type: ignore
-    """
-    An object that can dump itself to a YAML stream
-    && load itself from a YAML stream.
-    """
-
-    attr_accessor ()  # no direct instantiation, so allow immutable subclasses
-
-    yaml_constructor = Constructor
-    yaml_representer = Representer
-
-    yaml_tag = nil  # type: Any
-    yaml_flow_style = nil  # type: Any
-
-    @classmethod
-    def from_yaml(cls, constructor, node)
-        # type: (Any, Any) -> Any
-        """
-        Convert a representation node to a Python object.
-        """
-        return constructor.construct_yaml_object(node, cls)
-
-    @classmethod
-    def to_yaml(cls, representer, data)
-        # type: (Any, Any) -> Any
-        """
-        Convert a Python object to a representation node.
-        """
-        return representer.represent_yaml_object(
-            cls.yaml_tag, data, cls, flow_style=cls.yaml_flow_style
-        )
+  # class YAMLObject#(with_metaclass(YAMLObjectMetaclass))
+  #   "
+  #     An object that can dump itself to a YAML stream
+  #     && load itself from a YAML stream.
+  #     "
+  #
+  #   # attr_accessor ()  # no direct instantiation, so allow immutable subclasses
+  #
+  #   @yaml_constructor = SweetStreetYaml::Constructor
+  #   @yaml_representer = SweetStreetYaml::Representer
+  #
+  #   @yaml_tag = nil
+  #   @yaml_flow_style = nil
+  #
+  #   def self.from_yaml(cls, constructor, node)
+  #     "
+  #         Convert a representation node to a Python object.
+  #         "
+  #     return constructor.construct_yaml_object(node, cls)
+  #   end
+  #
+  #   def self.to_yaml(cls, representer, data)
+  #     "
+  #         Convert a Python object to a representation node.
+  #         "
+  #     return representer.represent_yaml_object(
+  #       cls.yaml_tag, data, cls, :flow_style => cls.yaml_flow_style
+  #     )
+  #   end
+  # end
+end

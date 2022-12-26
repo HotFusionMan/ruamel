@@ -11,10 +11,10 @@
 #     RoundTripRepresenter,
 # )
 # from ruamel.yaml.resolver import Resolver, BaseResolver, VersionedResolver
-require 'emitter' 
-require 'serializer' 
-require 'representer' 
-require 'resolver' 
+require_relative './emitter'
+require_relative './serializer'
+require_relative './representer'
+require_relative './resolver'
 
 module SweetStreetYaml
   class BaseDumper#(Emitter, Serializer, BaseRepresenter, BaseResolver)

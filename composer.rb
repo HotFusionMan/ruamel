@@ -19,12 +19,12 @@
 # )
 # from ruamel.yaml.nodes import MappingNode, ScalarNode, SequenceNode
 
-require 'compat'
-require 'error'
-require 'events'
-require 'nodes'
+# require 'compat'
+require_relative './error'
+require_relative './events'
+require_relative './nodes'
 
-module SweetStreeYaml
+module SweetStreetYaml
   class ComposerError < MarkedYAMLError
   end
 
@@ -112,16 +112,16 @@ module SweetStreeYaml
     def compose_node(parent, index) # checked
       if parser.check_event(AliasEvent)
         event = parser.get_event
-        alias = event.anchor
-        unless @anchors.has_key?(alias)
+        @alias = event.anchor
+        unless @anchors.has_key?(@alias)
           raise ComposerError.new(
             nil,
             nil,
-            _F('found undefined alias {alias!r}', alias=alias),
-            event.start_mark,
+            "found undefined alias #{@alias}",
+            event.start_mark
           )
         end
-        return_alias(@anchors[alias])
+        return_alias(@anchors[@alias])
       end
       event = parser.peek_event
       anchor = event.anchor
@@ -207,7 +207,7 @@ module SweetStreeYaml
       @anchors[anchor] = node if anchor
       until parser.check_event(MappingEndEvent)
         item_key = compose_node(node, nil)
-        node.value.append((item_key, item_value))
+        node.value.append(item_key, item_value)
       end
       end_event = parser.get_event
       node.comment = end_event.comment if node.flow_style && end_event.comment
