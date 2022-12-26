@@ -26,7 +26,7 @@ module SweetStreetYaml
     def_delegator :@_parser, :dispose
     def_delegator :@_resolver, :processing_version
 
-    def initialize(stream, version = nil, preserve_quotes = nil)
+    def initialize(stream, version = nil, preserve_quotes = nil) # checked
       @comment_handling = nil
       @_reader = Reader.new(stream, self)
       @_scanner = Scanner.new(self)
@@ -38,7 +38,7 @@ module SweetStreetYaml
   end
 
 
-  class Loader < BaseLoader
+  class Loader < BaseLoader # checked
     def initialize(stream, version = nil, preserve_quotes = nil)
       super
       @_constructor = BaseConstructor.new(:loader => self)
@@ -54,7 +54,7 @@ module SweetStreetYaml
   end
 
 
-  class RoundTripLoader < Loader
+  class RoundTripLoader < Loader # checked
     def initialize(stream, version = nil, preserve_quotes = nil)
       super
       @_scanner = RoundTripScanner.new(self)

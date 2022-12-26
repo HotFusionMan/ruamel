@@ -6,7 +6,7 @@
 # 
 # from ruamel.yaml.compat import _F
 
-require 'compat'
+# require 'compat'
 
 module SweetStreetYaml
   class Node
@@ -22,13 +22,7 @@ module SweetStreetYaml
     end
     
     def to_s
-        value = @value.to_s
-        return _F(
-            '{class_name!s}(tag={self_tag!r}, value={value!s})',
-            class_name=__class__.__name__,
-            self_tag=tag,
-            value=value,
-        )
+      "#{self.class.name}(tag=#{tag}, value=#{@value.to_s})"
     end
 
     def dump(indent = 0)

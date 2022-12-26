@@ -21,17 +21,17 @@ module SweetStreetYaml
   # - a regexp
   # - a list of first characters to match
   IMPLICIT_RESOLVERS = [
-    [[[1, 2]],
+    [[VERSION_1_2],
       'tag:yaml.org,2002:bool',
-      Regexp.new("'^(?:true|true|TRUE|false|false|FALSE)$'", Regexp::EXTENDED),
+      Regexp.new("'^(?:true|True|TRUE|false|False|FALSE)$'", Regexp::EXTENDED),
       SweetStreetYaml.list('tTfF')],
-    [[[1, 1]],
+    [[VERSION_1_1],
       'tag:yaml.org,2002:bool',
       Regexp.new("'^^(?:y|Y|yes|Yes|YES|n|N|no|No|NO
         |true|True|TRUE|false|False|FALSE
         |on|On|ON|off|Off|OFF)$'", Regexp.new::EXTENDED),
       SweetStreetYaml.list('yYnNtTfFoO')],
-    [[[1, 2]],
+    [[VERSION_1_2],
       'tag:yaml.org,2002:float',
       Regexp.new("'^(?:
          [-+]?(?:[0-9][0-9_]*)\\.[0-9_]*(?:[eE][-+]?[0-9]+)?
@@ -40,7 +40,7 @@ module SweetStreetYaml
         |[-+]?\\.(?:inf|Inf|INF)
         |\\.(?:nan|NaN|NAN))$'", Regexp.new::EXTENDED),
       SweetStreetYaml.list('-+0123456789.')],
-    [[[1, 1]],
+    [[VERSION_1_1],
       'tag:yaml.org,2002:float',
       Regexp.new("'^(?:
          [-+]?(?:[0-9][0-9_]*)\\.[0-9_]*(?:[eE][-+]?[0-9]+)?
@@ -50,14 +50,14 @@ module SweetStreetYaml
         |[-+]?\\.(?:inf|Inf|INF)
         |\\.(?:nan|NaN|NAN))$'", Regexp.new::EXTENDED),
       SweetStreetYaml.list('-+0123456789.')],
-    [[[1, 2]],
+    [[VERSION_1_2],
       'tag:yaml.org,2002:int',
       Regexp.new("'^(?:[-+]?0b[0-1_]+
         |[-+]?0o?[0-7_]+
         |[-+]?[0-9_]+
         |[-+]?0x[0-9a-fA-F_]+)$'", Regexp.new::EXTENDED),
       SweetStreetYaml.list('-+0123456789')],
-    [[[1, 1]],
+    [[VERSION_1_1],
       'tag:yaml.org,2002:int',
       Regexp.new("'^(?:[-+]?0b[0-1_]+
         |[-+]?0?[0-7_]+
@@ -65,17 +65,17 @@ module SweetStreetYaml
         |[-+]?0x[0-9a-fA-F_]+
         |[-+]?[1-9][0-9_]*(?::[0-5]?[0-9])+)$'", Regexp.new::EXTENDED),  # sexagesimal int
       SweetStreetYaml.list('-+0123456789')],
-    [[[1, 2], [1, 1]],
+    [[VERSION_1_2, VERSION_1_1],
       'tag:yaml.org,2002:merge',
       Regexp.new('^[?:<<]$'),
       ['<']],
-    [[[1, 2], [1, 1]],
+    [[VERSION_1_2, VERSION_1_1],
       'tag:yaml.org,2002:null',
       Regexp.new("'^(?: ~
         |null|Null|NULL
         | )$'", Regexp.new::EXTENDED),
       ['~', 'n', 'N', '']],
-    [[[1, 2], [1, 1]],
+    [[VERSION_1_2, VERSION_1_1],
       'tag:yaml.org,2002:timestamp',
       Regexp.new("'^(?:[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]
         |[0-9][0-9][0-9][0-9] -[0-9][0-9]? -[0-9][0-9]?
@@ -83,17 +83,17 @@ module SweetStreetYaml
         :[0-9][0-9] :[0-9][0-9] (?:\\.[0-9]*)?
         (?:[ \\t]*(?:Z|[-+][0-9][0-9]?(?::[0-9][0-9])?))?)$'", Regexp.new::EXTENDED),
       SweetStreetYaml.list('0123456789')],
-    [[[1, 2], [1, 1]],
+    [[VERSION_1_2, VERSION_1_1],
       'tag:yaml.org,2002:value',
       Regexp.new('^(?:=)$'),
       ['=']],
     # The following resolver is only for documentation purposes. It cannot work
     # because plain scalars cannot start with '!', '&', || '*'.
-    [[[1, 2], [1, 1]],
+    [[VERSION_1_2, VERSION_1_1],
       'tag:yaml.org,2002:yaml',
       Regexp.new('^(?:!|&|\\*)$'),
       SweetStreetYaml.list('!&*')]
-  ]
+  ].freeze
 
 
   class ResolverError < YAMLError
@@ -208,38 +208,42 @@ module SweetStreetYaml
         cls.yaml_path_resolvers[tuple(new_path), kind] = tag
 =end
 
-    def descend_resolver(current_node, current_index)
-        return unless self.class.yaml_path_resolvers
+    def descend_resolver(current_node, current_index) # checked
+      return unless yaml_path_resolvers = self.class.yaml_path_resolvers
 
-=begin
-        exact_paths = {}
-        prefix_paths = []
-        if current_node
-            depth = len(resolver_prefix_paths)
-            for path, kind in resolver_prefix_paths[-1]
-                if check_resolver_prefix(depth, path, kind, current_node, current_index)
-                    if len(path) > depth
-                        prefix_paths.append((path, kind))
-                    else
-                        exact_paths[kind] = yaml_path_resolvers[path, kind]
-        else
-            for path, kind in yaml_path_resolvers
-                if  !path
-                    exact_paths[kind] = yaml_path_resolvers[path, kind]
-                else
-                    prefix_paths.append((path, kind))
-        resolver_exact_paths.append(exact_paths)
-        resolver_prefix_paths.append(prefix_paths)
-=end
+      exact_paths = {}
+      prefix_paths = []
+      if current_node
+        depth = @resolver_prefix_paths.size
+        @resolver_prefix_paths[-1].each do |path, kind|
+          if check_resolver_prefix(depth, path, kind, current_node, current_index)
+            if path.size > depth
+              prefix_paths.append([path, kind])
+            else
+              exact_paths[kind] = yaml_path_resolvers[path][kind]
+            end
+          end
+        end
+      else
+        yaml_path_resolvers.each do |path, kind|
+          if path
+            prefix_paths.append([path, kind])
+          else
+            exact_paths[kind] = yaml_path_resolvers[path][kind]
+          end
+        end
+        @resolver_exact_paths.append(exact_paths)
+        @resolver_prefix_paths.append(prefix_paths)
+      end
     end
 
-    def ascend_resolver
+    def ascend_resolver # checked
       return unless self.class.yaml_path_resolvers
-      # resolver_exact_paths.pop()
-      # resolver_prefix_paths.pop()
+      @resolver_exact_paths.pop
+      @resolver_prefix_paths.pop
     end
 
-    def check_resolver_prefix(depth, path, kind, current_node, current_index)
+    def check_resolver_prefix(depth, path, kind, current_node, current_index) # checked
       node_check, index_check = path[depth - 1]
       if node_check.instance_of?(String)
         return false unless current_node.tag == node_check
@@ -250,30 +254,30 @@ module SweetStreetYaml
 
       return false if !index_check && current_index.nil?
 
-      if index_check.instance_of?(Dtring)
+      if index_check.instance_of?(String)
         return false unless current_index.instance_of?(ScalarNode) && index_check == current_index.value
-      elsif index_check.kind_of?(Integer) && ![TrueClass, FalseClass].include?(index_check.class)
+      elsif index_check.kind_of?(Integer)
         return false unless index_check == current_index
       end
 
       true
     end
 
-    def resolve(kind, value, implicit)
+    def resolve(kind, value, implicit) # checked
       if kind == ScalarNode && implicit[0]
         if value == ''
-          resolvers = yaml_implicit_resolvers.fetch("", [])
+          resolvers = self.class.yaml_implicit_resolvers.fetch('', [])
         else
-          resolvers = yaml_implicit_resolvers.fetch(value[0], [])
+          resolvers = self.class.yaml_implicit_resolvers.fetch(value[0], [])
         end
-        resolvers += yaml_implicit_resolvers.fetch(nil, [])
+        resolvers += self.class.yaml_implicit_resolvers.fetch(:none, [])
         resolvers.each { |tag, regexp| return tag if regexp.match?(value) }
         implicit = implicit[1]
       end
       unless self.class.yaml_path_resolvers.empty?
         exact_paths = @resolver_exact_paths[-1]
         return exact_paths[kind] if exact_paths.include?(kind)
-        return exact_paths[nil] if exact_paths.include?(nil)
+        return exact_paths[:none] if exact_paths.include?(:none)
       end
       case kind.to_s
         when 'ScalarNode'
@@ -312,8 +316,8 @@ IMPLICIT_RESOLVERS.each { |ir| Resolver.add_implicit_resolver_base(*ir[1..-1]) i
       @_version_implicit_resolver = {}
     end
 
-    def add_version_implicit_resolver(version, tag, regexp, first)
-      first = [nil] unless first
+    def add_version_implicit_resolver(version, tag, regexp, first) # checked
+      first ||= [:none]
       impl_resolver = @_version_implicit_resolver.fetch(version) { |version| @_version_implicit_resolver[version] = {} }
       first.each do |ch|
         impl_resolver.fetch(ch) do |ch|
@@ -323,43 +327,40 @@ IMPLICIT_RESOLVERS.each { |ir| Resolver.add_implicit_resolver_base(*ir[1..-1]) i
       end
     end
 
-    def get_loader_version(version)
-        return version if !version || version.instance_of?(Array)
+    def get_loader_version(version_string)
+      return version_string if !version_string || version_string.instance_of?(Gem::Version)
 
-        # assume string
-        return version.split('.').map(&:to_i)
+      Gem::Version.new(version_string)
     end
 
-    def versioned_resolver
-      "
-        select the resolver based on the version we are parsing
-        "
+    def versioned_resolver # checked
+      "select the resolver based on the version we are parsing"
       version = processing_version
       if version.instance_of?(String)
         version = version.split('.').map(&:to_i)
       end
-      unless @_version_implicit_resolver.include?(version)
-        IMPLICIT_RESOLVERS.each_key { |x| add_version_implicit_resolver(version, x[1], x[2], x[3]) if x[0].include?(version) }
+      unless @_version_implicit_resolver.has_key?(version)
+        IMPLICIT_RESOLVERS.each { |x| add_version_implicit_resolver(version, x[1], x[2], x[3]) if x[0].include?(version) }
       end
 
       @_version_implicit_resolver[version]
     end
 
-    def resolve(kind, value, implicit)
+    def resolve(kind, value, implicit) # checked
       if kind == ScalarNode && implicit[0]
         if value == ''
           resolvers = versioned_resolver.fetch('', [])
         else
           resolvers = versioned_resolver.fetch(value[0], [])
         end
-        resolvers += versioned_resolver.fetch(nil, [])
+        resolvers += versioned_resolver.fetch(:none, [])
         resolvers.each { |tag, regexp| return tag if regexp.match?(value) }
         implicit = implicit[1]
       end
       unless self.class.yaml_path_resolvers.empty?
         exact_paths = @resolver_exact_paths[-1]
-        return exact_paths[kind] if exact_paths.include?(kind)
-        return exact_paths[nil] if exact_paths.include?(nil)
+        return exact_paths[kind] if exact_paths.has_key?(kind)
+        return exact_paths[:none] if exact_paths.has_key?(:none)
         case kind.to_s
           when 'ScalarNode'
             return DEFAULT_SCALAR_TAG
@@ -371,7 +372,7 @@ IMPLICIT_RESOLVERS.each { |ir| Resolver.add_implicit_resolver_base(*ir[1..-1]) i
       end
     end
 
-    def processing_version
+    def processing_version # checked
       begin
         version = @loadumper._scanner.yaml_version
       rescue AttributeError
@@ -385,14 +386,7 @@ IMPLICIT_RESOLVERS.each { |ir| Resolver.add_implicit_resolver_base(*ir[1..-1]) i
           version = nil
         end
       end
-      if version.nil?
-        version = @_loader_version
-        if version.nil?
-          version = _DEFAULT_YAML_VERSION
-        end
-      end
-
-      version
+      version ||= (@_loader_version || DEFAULT_YAML_VERSION)
     end
   end
 end

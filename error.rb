@@ -4,29 +4,23 @@
 # import textwrap
 
 # from ruamel.yaml.compat import _F
-require 'compat'
 
 module SweetStreetYaml
   class StreamMark
     attr_accessor :name, :index, :line, :column
 
     def initialize(name, index, line, column)
-        @name = name
-        @index = index
-        @line = line
-        @column = column
+      @name = name
+      @index = index
+      @line = line
+      @column = column
     end
 
     def to_str
-      _F(
-        '  in "{sname!s}", line {sline1:d}, column {scolumn1:d}',
-        sname=name,
-        sline1=line + 1,
-        scolumn1=column + 1,
-        )
+      "  in '#{name}', line #{line + 1}, column #{column + 1}"
     end
 
-    def eql?(self, other)
+    def eql?(other)
       return false if @line != other.line || @column != other.column || @name != other.name || @index != other.index
 
       true
@@ -144,12 +138,12 @@ module SweetStreetYaml
     def to_str
       lines = []
       lines.append(@context) if @context
-      if @context_mark  && (
-      @problem.nil?
-      || @problem_mark.nil?
-      || @context_mark.name != @problem_mark.name
-      || @context_mark.line != @problem_mark.line
-      || @context_mark.column != @problem_mark.column
+      if @context_mark && (
+        @problem.nil? ||
+        @problem_mark.nil? ||
+        @context_mark.name != @problem_mark.name ||
+        @context_mark.line != @problem_mark.line ||
+        @context_mark.column != @problem_mark.column
       )
         lines.append(@context_mark.to_s)
       end
@@ -161,17 +155,18 @@ module SweetStreetYaml
       end
       lines.join("\n")
     end
+  end
 
 
-    class YAMLStreamError < Exception
-    end
+  class YAMLStreamError < Exception
+  end
 
 
-    class YAMLWarning < Warning
-    end
+  class YAMLWarning < Exception
+  end
 
 
-class MarkedYAMLWarning < YAMLWarning
+  class MarkedYAMLWarning < YAMLWarning
     def initialize(
         context: nil,
         context_mark: nil,
@@ -192,11 +187,11 @@ class MarkedYAMLWarning < YAMLWarning
       lines = []
       lines.append(@context) if @context
       if @context_mark && (
-      @problem.nil?
-      || @problem_mark .nil?
-      || @context_mark.name != @problem_mark.name
-      || @context_mark.line != @problem_mark.line
-      || @context_mark.column != @problem_mark.column
+        @problem.nil? ||
+        @problem_mark .nil? ||
+        @context_mark.name != @problem_mark.name ||
+        @context_mark.line != @problem_mark.line ||
+        @context_mark.column != @problem_mark.column
       )
         lines.append(@context_mark.to_s)
       end
@@ -212,10 +207,11 @@ class MarkedYAMLWarning < YAMLWarning
       end
       lines.join("\n")
     end
+  end
 
 
-    class ReusedAnchorWarning < YAMLWarning
-    end
+  class ReusedAnchorWarning < YAMLWarning
+  end
 
 
   class UnsafeLoaderWarning < YAMLWarning
@@ -248,23 +244,20 @@ In YAML 1.1 floating point values should have a dot ('.') in their mantissa.
 See the Floating-Point Language-Independent Type for YAML™ Version 1.1 specification
 ( http://yaml.org/type/float.html ). This dot is  !required for JSON nor for YAML 1.2
 
-Correct your float: "{}" on line: {}, column: {}
+Correct your float: #{@flt} on line: #{line}, column: #{col}
 
 or alternatively include the following in your code
 
   import warnings
   warnings.simplefilter('ignore', ruamel.yaml.error.MantissaNoDotYAML1_1Warning)
-
-".format(
-            @flt, line, col
-        )
+"
     end
   end
 
 # warnings.simplefilter('once', MantissaNoDotYAML1_1Warning)
 
 
-  class YAMLFutureWarning < Warning
+  class YAMLFutureWarning < Exception
   end
 
 
@@ -290,11 +283,11 @@ or alternatively include the following in your code
       lines.append(@context) if @context
 
       if c@ontext_mark && (
-      @problem.nil?
-      || @problem_mark.nil?
-      || @context_mark.name != @problem_mark.name
-      || @context_mark.line != @problem_mark.line
-      || @context_mark.column != @problem_mark.column
+        @problem.nil? ||
+        @problem_mark.nil? ||
+        @context_mark.name != @problem_mark.name ||
+        @context_mark.line != @problem_mark.line ||
+        @context_mark.column != @problem_mark.column
       )
         lines.append(@context_mark.to_str)
       end

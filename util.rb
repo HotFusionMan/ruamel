@@ -53,23 +53,24 @@ module SweetStreetYaml
 # 
 # RegExp = partial(LazyEval, re.compile)
 
-    TIMESTAMP_REGEXP = Regexp(
-      "^(?P<year>[0-9][0-9][0-9][0-9])
-       -(?P<month>[0-9][0-9]?)
-       -(?P<day>[0-9][0-9]?)
-       (?:((?P<t>[Tt])|[ \\t]+)   # explictly not retaining extra spaces
-       (?P<hour>[0-9][0-9]?)
-       :(?P<minute>[0-9][0-9])
-       :(?P<second>[0-9][0-9])
-       (?:\\.(?P<fraction>[0-9]*))?
-        (?:[ \\t]*(?P<tz>Z|(?P<tz_sign>[-+])(?P<tz_hour>[0-9][0-9]?)
-       (?::(?P<tz_minute>[0-9][0-9]))?))?)?$",
+    # TIMESTAMP_REGEXP explictly does not retain extra spaces:
+    TIMESTAMP_REGEXP = Regexp.new(
+      "^(?<year>[0-9][0-9][0-9][0-9])
+       -(?<month>[0-9][0-9]?)
+       -(?<day>[0-9][0-9]?)
+       (?:((?<t>[Tt])|[ \\t]+)
+       (?<hour>[0-9][0-9]?)
+       :(?<minute>[0-9][0-9])
+       :(?<second>[0-9][0-9])
+       (?:\\.(?<fraction>[0-9]*))?
+        (?:[ \\t]*(?<tz>Z|(?<tz_sign>[-+])(?<tz_hour>[0-9][0-9]?)
+       (?::(?<tz_minute>[0-9][0-9]))?))?)?$",
       Regexp::EXTENDED
     )
 
 
     MAX_FRAC = 999999
-    def create_timestamp(year, month, day, t, hour = nil, minute = nil, second = nil, fraction = nil, tz = nil, tz_sign, = nil tz_hour = nil, tz_minute = nil)
+    def create_timestamp(year, month, day, t, hour = nil, minute = nil, second = nil, fraction = nil, tz = nil, tz_sign = nil, tz_hour = nil, tz_minute = nil)
       # create a timestamp from match against TIMESTAMP_REGEXP
       year = year.to_i
       month = month.to_i
@@ -139,7 +140,7 @@ module SweetStreetYaml
 
       if stream.instance_of?(String)
         yaml_str = stream
-      elsif isinstance(stream.instance_of?(Array)
+      elsif stream.instance_of?(Array)
         # most likely, but the Reader checks BOM for this
         yaml_str = stream.decode('utf-8')
       else
@@ -186,7 +187,7 @@ module SweetStreetYaml
       yaml = YAML.new
       return yaml.load(yaml_str, **kw), indent, block_seq_indent
     end
-    module_function :load_yaml_gues_indent
+    module_function :load_yaml_guess_indent
 
 
     # load a YAML document, guess the indentation, if you use TABs you are on your own

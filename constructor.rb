@@ -13,17 +13,17 @@ require 'base64'
 require 'complex'
 require 'set'
 
-require 'error'
-require 'nodes'
-require 'compat'
-require 'comments'
-require 'scalarstring'
-require 'scalarint'
-require 'scalarfloat'
-require 'scalarbool'
-require 'serializer'
-require 'timestamp'
-require 'util'
+require_relative './error'
+require_relative './nodes'
+require_relative './compat'
+require_relative './comments'
+require_relative './scalar_string'
+require_relative './scalar_int'
+require_relative './scalar_float'
+require_relative './scalar_boolean'
+require_relative './serializer'
+require_relative './timestamp'
+require_relative './util'
 
 
 module SweetStreetYaml
@@ -35,7 +35,7 @@ module SweetStreetYaml
   end
 
 
-  class BaseConstructor
+  class BaseConstructor # checked
     def initialize(preserve_quotes: nil, loader: nil)
       @loader = loader
       @loader._constructor = self unless @loader&._constructor
@@ -51,15 +51,15 @@ module SweetStreetYaml
     @yaml_constructors = {}
     @yaml_multi_constructors = {}
     def self.yaml_constructors
-      @yaml_constructors 
+      @yaml_constructors
     end
     def yaml_constructors
       self.class.yaml_constructors
     end
-    def self.yaml_multiconstructors
+    def self.yaml_multi_constructors
       @yaml_multiconstructors 
     end
-    def yaml_multiconstructors
+    def yaml_multi_constructors
       self.class.yaml_multiconstructors
     end
 
@@ -82,7 +82,7 @@ module SweetStreetYaml
       return @loader._resolver
     end
 
-    def scanner
+    def scanner # checked
       # needed to get to the expanded comments
       return @loader.scanner if @loader.respond_to?('typ')
 
@@ -94,7 +94,7 @@ module SweetStreetYaml
       composer.check_node
     end
 
-    def get_data
+    def get_data # checked
       # Construct and return the next document.
       construct_document(composer.get_node) if composer.check_node
     end
@@ -106,7 +106,7 @@ module SweetStreetYaml
     end
 
 
-    def construct_document(node)
+    def construct_document(node) # checked
       data = construct_object(node)
       until @state_generators.empty?
         old_state_generators = @state_generators
@@ -121,11 +121,11 @@ module SweetStreetYaml
       data
     end
 
-    def construct_object(node, deep = false)
+    def construct_object(node, deep = false) # checked
       "deep is true when creating an object/mapping recursively, in that case want the underlying elements available during construction"
-      return @constructed_objects[node] if @constructed_objects.include?(node)
+      return @constructed_objects[node] if @constructed_objects.has_key?(node)
 
-      return @recursive_objects[node] if @recursive_objects.include?(node)
+      return @recursive_objects[node] if @recursive_objects.has_key?(node)
 
       if deep
         old_deep = @deep_construct
@@ -145,7 +145,7 @@ module SweetStreetYaml
       constructor = nil
       tag_suffix = nil
       tag ||= node.tag
-      if yaml_constructors.include?(tag)
+      if yaml_constructors.has_key?(tag)
         constructor = yaml_constructors[tag]
       else
         found = false
@@ -158,23 +158,25 @@ module SweetStreetYaml
           end
         end
         unless found
-          if yaml_multi_constructors.include?('NULL TAG')
+          if yaml_multi_constructors.has_key?('NULL TAG')
             tag_suffix = tag
             constructor = yaml_multi_constructors['NULL TAG']
-          elsif yaml_constructors.include?('NULL TAG')
+          elsif yaml_constructors.has_key?('NULL TAG')
             constructor = yaml_constructors['NULL TAG']
           elsif node.instance_of?(ScalarNode)
-            constructor = self.class.construct_scalar
+            constructor = self.class.method(:construct_scalar)
           elsif node.instance_of?(SequenceNode)
-            constructor = self.class.construct_sequence
+            constructor = self.class.method(:construct_sequence)
           elsif node.instance_of?(MappingNode)
-            constructor = self.class.construct_mapping
+            constructor = self.class.method(:construct_mapping)
           end
         end
       end
       if tag_suffix
+        # Hopefully we never get into this branch, because there seem to be no iterator-type constructors that take two arguments and have node as the second argument, let along tag_suffix as the first argument.
         if constructor[:is_iterator]
-          generator = constructor[:constructor].call(tag_suffix, node)
+          # generator = constructor[:constructor].call(tag_suffix, node) # TODO: NOT SURE WHAT IS HAPPENING IN GENERATOR
+          generator = constructor[:constructor].call(node)
           data = generator.call(tag_suffix, node)
           if @deep_construct
             generator.each { |_dummy| }
@@ -187,7 +189,7 @@ module SweetStreetYaml
       else
         if constructor[:is_iterator]
           generator = constructor[:constructor].call(node)
-          data = generator.call(node)
+          data = generator.yield(node)
           if @deep_construct
             generator.each { |_dummy| }
           else
@@ -205,14 +207,14 @@ module SweetStreetYaml
         raise ConstructorError.new(
           nil,
           nil,
-          "expected a scalar node, but found #{node.id}"),
+          "expected a scalar node, but found #{node.id}",
           node.start_mark
         )
       end
       node.value
     end
 
-    def construct_sequence(node, deep = false)
+    def construct_sequence(node, deep = false) # checked
       "deep is true when creating an object/mapping recursively, in that case want the underlying elements available during construction"
       unless node.instance_of?(SequenceNode)
         raise ConstructorError.new(
@@ -222,7 +224,7 @@ module SweetStreetYaml
           node.start_mark,
           )
       end
-      node.value.map { |child| construct_object(child, deep = deep) }
+      node.value.map { |child| construct_object(child, deep) }
     end
 
     def construct_mapping(node, deep = false)
@@ -237,9 +239,9 @@ module SweetStreetYaml
       end
       total_mapping = @yaml_base_dict_type.call
       if node.__send__('merge').nil?
-        todo = [(node.value, true)]
+        todo = [[node.value, true]]
       else
-        todo = [(node.merge, false), (node.value, false)]
+        todo = [[node.merge, false], [node.value, false]]
       end
       todo.each do |values, check|
         mapping = @yaml_base_dict_type.call
@@ -272,18 +274,16 @@ module SweetStreetYaml
       end
     end
 
-    def check_mapping_key(node, key_node, mapping, key, value)
+    def check_mapping_key(node, key_node, mapping, key, value) # checked
       "return true if key is unique"
-      if mapping.include?(key)
-        mk = mapping.get(key)
-        args = [
+      if mapping.has_key?(key)
+        mk = mapping.fetch(key)
+        raise DuplicateKeyError.new(
           'while constructing a mapping',
           node.start_mark,
-          'found duplicate key "{}" with value "{}" '
-        '(original value: "{}")'.format(key, value, mk),
+          "found duplicate key '#{key}' with value '#{value}' (original value: '{mk}')",
           key_node.start_mark
-        ]
-        raise DuplicateKeyError.new(*args)
+        )
       end
       true
     end
@@ -324,6 +324,7 @@ module SweetStreetYaml
     end
 
     def self.add_multi_constructor(tag_prefix, multi_constructor, is_iterator = false)
+      # Used only for Python object {de}serialization.
       @yaml_multi_constructors ||= superclass.instance_variable_get(:@yaml_multi_constructors).dup unless self == BaseConstructor
       @yaml_multi_constructors[tag_prefix] = { :constructor => multi_constructor, :is_iterator => is_iterator }
     end
@@ -331,6 +332,7 @@ module SweetStreetYaml
 
 
   class SafeConstructor < BaseConstructor
+    class << self
     def construct_scalar(node)
       if node.instance_of?(MappingNode)
         node.value.each do |key_node, value_node|
@@ -396,12 +398,8 @@ module SweetStreetYaml
               raise ConstructorError.new(
                 'while constructing a mapping',
                 node.start_mark,
-                _F(
-                  'expected a mapping or list of mappings for merging, '
-              'but found {value_node_id!s}',
-                value_node_id=value_node.id,
-              ),
-                value_node.start_mark,
+                "expected a mapping or list of mappings for merging, but found #{value_node.id}",
+                value_node.start_mark
               )
             end
           when 'tag:yaml.org,2002:value'
@@ -425,6 +423,7 @@ module SweetStreetYaml
     end
 
     alias :construct_yaml_null :construct_scalar
+    end
 
     # YAML 1.2 spec doesn't mention yes/no etc any more, 1.1 does
     BOOL_VALUES = {
@@ -438,6 +437,7 @@ module SweetStreetYaml
       'off' => false
     }.freeze
 
+    class << self
     def construct_yaml_bool(node)
       value = construct_scalar(node)
       BOOL_VALUES[value.downcase]
@@ -604,7 +604,7 @@ module SweetStreetYaml
     def construct_yaml_pairs(node)
       # Note: the same code as `construct_yaml_omap`.
       pairs = []
-      yield pairs
+      yield pairs.each
       unless node.instance_of?(SequenceNode)
         raise ConstructorError.new(
           'while constructing pairs',
@@ -685,6 +685,7 @@ module SweetStreetYaml
             node.start_mark
         )
     end
+    end
   end
 
   SafeConstructor.add_constructor('tag:yaml.org,2002:null', SafeConstructor.method(:construct_yaml_null))
@@ -714,6 +715,7 @@ module SweetStreetYaml
   SafeConstructor.add_constructor('NULL TAG', SafeConstructor.method(:construct_undefined))
 
 
+=begin
   class Constructor < SafeConstructor
     alias :construct_python_str :construct_scalar
     alias :construct_python_unicode :construct_scalar
@@ -791,8 +793,8 @@ module SweetStreetYaml
             break
           rescue LoadError
             continue
-          end
         end
+          end
       else
         module_name = builtins_module
         lobject_name = [name]
@@ -967,32 +969,31 @@ module SweetStreetYaml
   Constructor.add_multi_constructor('tag:yaml.org,2002:python/object/apply:', Constructor.method(:construct_python_object_apply))
 
   Constructor.add_multi_constructor('tag:yaml.org,2002:python/object/new:', Constructor.method(:construct_python_object_new))
+=end
 
 
   class RoundTripConstructor < SafeConstructor
-    "need to store the comments on the node itself,
-    as well as on the items
-    "
+    # need to store the comments on the node itself, as well as on the items
 
-    def comment(idx)
+    def comment(idx) # checked
       raise unless @loader.comment_handling
       x = scanner.comments[idx]
       x.set_assigned
       x
     end
 
-    def comments(list_of_comments, idx = nil)
+    def comments(list_of_comments, idx = nil) # checked
       # hand in the comment and optional pre, eol, post segment
-      return [] if list_of_comments.nil?
-      unless idx.nil?
-        return [] if list_of_comments[idx].nil?
+      return [] unless list_of_comments
+      if idx
+        return [] unless list_of_comments[idx]
 
         list_of_comments = list_of_comments[idx]
       end
       list_of_comments.each { |x| yield comment(x) }
     end
 
-    def construct_scalar(node)
+    def construct_scalar(node) # checked
       unless node.instance_of?(ScalarNode)
         raise ConstructorError.new(
           nil,
@@ -1003,7 +1004,7 @@ module SweetStreetYaml
       end
 
       if node.style == '|' && node.value.instance_of?(String)
-        lss = LiteralScalarString(node.value, node.anchor)
+        lss = LiteralScalarString.new(node.value, :anchor => node.anchor)
         if @loader && @loader.comment_handling.nil?
           if node.comment && node.comment[1]
             lss.comment = node.comment[1][0]
@@ -1022,11 +1023,11 @@ module SweetStreetYaml
         fold_positions = []
         idx = -1
         loop do
-          idx = node.value[(idx + 1)..-1]).index("\a")
+          idx = node.value[(idx + 1)..-1].index("\a")
           break unless idx
           fold_positions.append(idx - fold_positions.size)
         end
-        fss = FoldedScalarString(node.value.gsub("\a", ''), node.anchor)
+        fss = FoldedScalarString.new(node.value.gsub("\a", ''), :anchor => node.anchor)
         if @loader && @loader.comment_handling.nil?
           if node&.comment[1]
             fss.comment = node.comment[1][0]
@@ -1041,12 +1042,12 @@ module SweetStreetYaml
         end
         fss.fold_pos = fold_positions unless fold_positions.empty?
         return fss
-      elsif @preserve_quotes.to_boolean && node.value.instance_of?(String)
-        return SingleQuotedScalarString(node.value, node.anchor) if node.style == "'"
+      elsif @preserve_quotes && node.value.instance_of?(String)
+        return SingleQuotedScalarString.new(node.value, :anchor => node.anchor) if node.style == "'"
 
-        return DoubleQuotedScalarString(node.value, anchor=node.anchor) if node.style == '"'
+        return DoubleQuotedScalarString.new(node.value, :anchor => node.anchor) if node.style == '"'
       end
-      return PlainScalarString(node.value, anchor=node.anchor) if node.anchor
+      return PlainScalarString.new(node.value, :anchor => node.anchor) if node.anchor
 
       node.value
     end
@@ -1121,7 +1122,7 @@ module SweetStreetYaml
           underscore[2] = len(value_su[2..-1]) > 1 && value_su[-1] == '_'
         end
         return OctalInt.new(
-          sign * value_s[2:].to_i(8),
+          sign * value_s[2..-1].to_i(8),
           width,
             underscore,
             node.anchor
@@ -1155,7 +1156,7 @@ module SweetStreetYaml
         underscore[2] = value_su.size > 1 && value_su[-1] == '_'
         return ScalarInt.new(sign * value_s.to_i, nil, underscore, node.anchor)
       elsif node.anchor
-        return ScalarInt.new(sign (value_s.to_i, nil, underscore, node.anchor)
+        return ScalarInt.new(sign * value_s.to_i, nil, underscore, node.anchor)
       else
         return sign * value_s.to_i
       end
@@ -1170,7 +1171,7 @@ module SweetStreetYaml
       end
       lead0
     end
-    include Serializer
+    # include Serializer
 
     def construct_yaml_float(node)
       # underscore = nil
@@ -1289,12 +1290,12 @@ module SweetStreetYaml
       ret_val
     end
 
-    def constructed(value_node)
+    def constructed(value_node) # checked
       # If the contents of a merge are defined within the
       # merge marker, then they won't have been constructed
       # yet. But if they were already constructed, we need to use
       # the existing object.
-      if @constructed_objects.include?(value_node)
+      if @constructed_objects.has_key?(value_node)
         value = @constructed_objects[value_node]
       else
         value = construct_object(value_node, false)
@@ -1302,12 +1303,10 @@ module SweetStreetYaml
       value
     end
 
-    def flatten_mapping(node)
-      "
-        This implements the merge key feature http://yaml.org/type/merge.html
+    def flatten_mapping(node) # checked
+      "This implements the merge key feature http://yaml.org/type/merge.html
         by inserting keys from the merge dict/list of dicts if not yet
-        available in this node
-        "
+        available in this node"
 
       # merge = []
       merge_map_list = []
@@ -1316,17 +1315,16 @@ module SweetStreetYaml
         key_node, value_node = node.value[index]
         if key_node.tag == 'tag:yaml.org,2002:merge'
           if merge_map_list
-            args = [
+            raise DuplicateKeyError.new(
               'while constructing a mapping',
               node.start_mark,
               'found duplicate key "{}"'.format(key_node.value),
               key_node.start_mark
-            ]
-            raise DuplicateKeyError.new(*args)
+            )
           end
-          node.value.delete(index)
+          node.value.delete_at(index)
           if value_node.instance_of?(MappingNode)
-            merge_map_list.append((index, constructed(value_node)))
+            merge_map_list.append([index, constructed(value_node)])
             # flatten_mapping(value_node)
             # merge.extend(value_node.value)
           elsif value_node.instance_of?(SequenceNode)
@@ -1343,7 +1341,7 @@ module SweetStreetYaml
                   subnode.start_mark,
                   )
               end
-              merge_map_list.append((index, constructed(subnode)))
+              merge_map_list.append([index, constructed(subnode)])
             end
             #     flatten_mapping(subnode)
             #     submerge.append(subnode.value)
@@ -1354,12 +1352,8 @@ module SweetStreetYaml
             raise ConstructorError.new(
               'while constructing a mapping',
               node.start_mark,
-              _F(
-                'expected a mapping or list of mappings for merging, '
-            'but found {value_node_id!s}',
-              value_node_id=value_node.id,
-            ),
-              value_node.start_mark,
+              "expected a mapping or list of mappings for merging, but found #{value_node.id}",
+              value_node.start_mark
             )
           end
         elsif key_node.tag == 'tag:yaml.org,2002:value'
@@ -1377,7 +1371,7 @@ module SweetStreetYaml
     def _sentinel
     end
 
-    def construct_mapping(node, maptyp, deep = false)
+    def construct_mapping(node, maptyp, deep = false) # checked
       unless node.instance_of?(MappingNode)
         raise ConstructorError.new(
           nil,
@@ -1548,7 +1542,7 @@ module SweetStreetYaml
       data._yaml_set_line_col(node.start_mark.line, node.start_mark.column)
       # if node.comment
       #    data._yaml_add_comment(node.comment)
-      yield data
+      yield data.each
       data.merge(construct_rt_sequence(node, data))
       set_collection_style(data, node)
     end
@@ -1556,7 +1550,7 @@ module SweetStreetYaml
     def construct_yaml_map(node)
       data = CommentedMap.new
       data._yaml_set_line_col(node.start_mark.line, node.start_mark.column)
-      yield data
+      yield data.each
       construct_mapping(node, data, true)
       set_collection_style(data, node)
     end
@@ -1604,7 +1598,7 @@ module SweetStreetYaml
       else
         omap.fa.set_block_style
       end
-      yield omap
+      yield omap.each
       if @loader && @loader.comment_handling.nil?
         if node.comment
           omap._yaml_add_comment(node.comment[0..2])
@@ -1670,7 +1664,7 @@ module SweetStreetYaml
     def construct_yaml_set(node)
       data = CommentedSet.new
       data._yaml_set_line_col(node.start_mark.line, node.start_mark.column)
-      yield data
+      yield data.each
       construct_setting(node, data)
     end
 
@@ -1685,7 +1679,7 @@ module SweetStreetYaml
             data.fa.set_block_style
           end
           data.yaml_set_tag(node.tag)
-          yield data
+          yield data.each
 
           if node.anchor
             data.yaml_set_anchor(node.anchor) unless templated_id(node.anchor)

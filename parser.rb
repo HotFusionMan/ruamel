@@ -80,7 +80,7 @@ require 'compat' # _F, nprint, nprintf
 
 
 module SweetStreetYaml
-  MINIMUM_YAML_VERSION = [10 * 1, 1].sum
+  MINIMUM_YAML_VERSION = VERSION_1_1
 
   class ParserError < MarkedYAMLError
   end
@@ -88,7 +88,9 @@ module SweetStreetYaml
   class Parser
     DEFAULT_TAGS = { '!' => '!', '!!' => 'tag:yaml.org,2002:' }.freeze
 
-    def initialize(loader)
+    attr_accessor :_parser
+
+    def initialize(loader) # checked
       @loader = loader
       if @loader && @loader._parser.nil?
         @loader._parser = self
@@ -96,7 +98,7 @@ module SweetStreetYaml
       reset_parser
     end
 
-    def reset_parser
+    def reset_parser # checked
       # Reset the state attributes (to clear self-references)
       @current_event = @last_event = nil
       @tag_handles = {}
@@ -127,8 +129,8 @@ module SweetStreetYaml
 
     def check_event(*choices)
       if @current_event.nil?
-        if state
-          @current_event = state
+        if @state
+          @current_event = @state
         end
       end
 
@@ -143,8 +145,8 @@ module SweetStreetYaml
 
     def peek_event
       if @current_event.nil?
-        if state
-          @current_event = state
+        if @state
+          @current_event = @state
         end
       end
       @current_event
@@ -152,8 +154,8 @@ module SweetStreetYaml
 
     def get_event
       if @current_event.nil?
-        if state
-          @current_event = state
+        if @state
+          @current_event = @state
         end
       end
       @last_event = @current_event
@@ -166,10 +168,10 @@ module SweetStreetYaml
     # implicit_document ::= block_node DOCUMENT-END*
     # explicit_document ::= DIRECTIVE* DOCUMENT-START block_node? DOCUMENT-END*
 
-    def parse_stream_start
-      token = @scanner.get_token
+    def parse_stream_start # checked
+      token = scanner.get_token
       move_token_comment(token)
-      event = StreamStartEvent.new(token.start_mark, token.end_mark, encoding)
+      event = StreamStartEvent.new(:start_mark => token.start_mark, :end_mark => token.end_mark, :encoding => encoding)
 
       # Prepare the next state.
       @state = parse_implicit_document_start
@@ -177,14 +179,14 @@ module SweetStreetYaml
       event
     end
 
-    def parse_implicit_document_start
+    def parse_implicit_document_start # checked
       if scanner.check_token(DirectiveToken, DocumentStartToken, StreamEndToken)
         return parse_document_start
       else
         @tag_handles = DEFAULT_TAGS
         token = @scanner.peek_token
         start_mark = end_mark = token.start_mark
-        event = DocumentStartEvent.new(start_mark, end_mark, explicit=False)
+        event = DocumentStartEvent.new(:start_mark => start_mark, :end_mark => end_mark, :explicit => false)
 
         # Prepare the next state.
         @states.append(parse_document_end)
@@ -194,13 +196,13 @@ module SweetStreetYaml
       end
     end
 
-    def parse_document_start
+    def parse_document_start # checked
       # Parse any extra document end indicators.
       while @scanner.check_token(DocumentEndToken)
         @scanner.get_token
       end
       # Parse an explicit document.
-      if scanner.check_token(StreamEndToken)
+      if @scanner.check_token(StreamEndToken)
         # Parse the end of the stream.
         token = @scanner.get_token
         event = StreamEndEvent.new(token.start_mark, token.end_mark, comment=token.comment)
@@ -225,14 +227,20 @@ module SweetStreetYaml
         start_mark = token.start_mark
         end_mark = token.end_mark
         event = DocumentStartEvent.new(
-          start_mark, end_mark, explicit=True, version=version, tags=tags, comment=token.comment)
+          :start_mark => start_mark,
+          :end_mark => end_mark,
+          :explicit => true,
+          :version => version,
+          :tags => tags,
+          :comment => token.comment
+        )
         @states.append(parse_document_end)
         @state = parse_document_content
       end
       event
     end
 
-    def parse_document_end
+    def parse_document_end # checked
       # Parse the document end.
       token = @scanner.peek_token
       start_mark = end_mark = token.start_mark
@@ -242,10 +250,10 @@ module SweetStreetYaml
         end_mark = token.end_mark
         explicit = true
       end
-      event = DocumentEndEvent.new(start_mark, end_mark, explicit=explicit)
+      event = DocumentEndEvent.new(:start_mark => start_mark, :end_mark => end_mark, :explicit => explicit)
 
       # Prepare the next state.
-      if @resolver.processing_version == [1, 1]
+      if @resolver.processing_version == VERSION_1_1
         @state = parse_document_start
       else
         @state = parse_implicit_document_start
@@ -254,7 +262,7 @@ module SweetStreetYaml
       event
     end
 
-    def parse_document_content
+    def parse_document_content # checked
       if @scanner.check_token(DirectiveToken, DocumentStartToken, DocumentEndToken, StreamEndToken)
         event = process_empty_scalar(@scanner.peek_token.start_mark)
         @state = @states.pop
@@ -305,9 +313,7 @@ module SweetStreetYaml
 
       if @loader.respond_to?(:tags)
         @loader.version = yaml_version
-        if @loader.tags.nil?
-          @loader.tags = {}
-        end
+        @loader.tags ||= {}
         # @tag_handles.each_key { |k| @loader.tags[k] = @tag_handles[k]  }
         @loader.tags.merge!(@tag_handles)
       end
@@ -331,7 +337,7 @@ module SweetStreetYaml
     # block_collection  ::= block_sequence | block_mapping
     # flow_collection   ::= flow_sequence | flow_mapping
 
-    def parse_block_node
+    def parse_block_node # checked
       parse_node(true)
     end
 
@@ -340,7 +346,7 @@ module SweetStreetYaml
     #   parse_node
     # end
 
-    def parse_block_node_or_indentless_sequence
+    def parse_block_node_or_indentless_sequence # checked
       parse_node(true, true)
     end
 
@@ -348,10 +354,10 @@ module SweetStreetYaml
       @tag_handles[handle] + suffix
     end
 
-    def parse_node(block = false, indentless_sequence = false)
+    def parse_node(block = false, indentless_sequence = false) # checked
       if @scanner.check_token(AliasToken)
         token = @scanner.get_token
-        event = AliasEvent.new(token.value, token.start_mark, token.end_mark)
+        event = AliasEvent.new(token.value, :start_mark => token.start_mark, :end_mark => token.end_mark)
         @state = @states.pop
         return event
       end
@@ -407,7 +413,7 @@ module SweetStreetYaml
         comment = nil
         pt = @scanner.peek_token
         if @loader && @loader.comment_handling.nil?
-          if pt.comment && pt.comment[0]
+          if pt&.comment[0]
             comment = [pt.comment[0], []]
             pt.comment[0] = nil
           end
@@ -418,7 +424,7 @@ module SweetStreetYaml
         end
         end_mark = @scanner.peek_token.end_mark
         event = SequenceStartEvent.new(
-          anchor, tag, implicit, start_mark, end_mark, flow_style=False, comment=comment
+          anchor, tag, implicit, :start_mark => start_mark, :end_mark => end_mark, :flow_style => false, :comment => comment
         )
         @state = parse_indentless_sequence_entry
         return event
@@ -439,10 +445,10 @@ module SweetStreetYaml
           tag,
           implicit,
           token.value,
-          start_mark,
-          end_mark,
-          style=token.style,
-          comment=token.comment
+          :start_mark => start_mark,
+          :end_mark => end_mark,
+          :style => token.style,
+          :comment => token.comment
           )
         @state = @states.pop
       elsif @scanner.check_token(FlowSequenceStartToken)
@@ -452,10 +458,10 @@ module SweetStreetYaml
           anchor,
           tag,
           implicit,
-          start_mark,
-          end_mark,
-          flow_style=true,
-          comment=pt.comment
+          :start_mark => start_mark,
+          :end_mark => end_mark,
+          :flow_style => true,
+          :comment => pt.comment
           )
         @state = parse_flow_sequence_first_entry
       elsif @scanner.check_token(FlowMappingStartToken)
@@ -465,10 +471,10 @@ module SweetStreetYaml
           anchor,
           tag,
           implicit,
-          start_mark,
-          end_mark,
-          flow_style=true,
-          comment=pt.comment
+          :start_mark => start_mark,
+          :end_mark => end_mark,
+          :flow_style => true,
+          :comment => pt.comment
           )
         @state = parse_flow_mapping_first_key
       elsif block && @scanner.check_token(BlockSequenceStartToken)
@@ -478,17 +484,17 @@ module SweetStreetYaml
         if comment.nil? || comment[1].nil?
           comment = pt.split_old_comment
         end
-        event = SequenceStartEvent.new(anchor, tag, implicit, start_mark, end_mark, flow_style=false, comment=comment)
+        event = SequenceStartEvent.new(anchor, tag, implicit, :start_mark => start_mark, :end_mark => end_mark, :flow_style => false, :comment => comment)
         @state = parse_block_sequence_first_entry
       elsif block && @scanner.check_token(BlockMappingStartToken)
         pt = @scanner.peek_token
         end_mark = pt.start_mark
         comment = pt.comment
-        event = MappingStartEvent.new(anchor, tag, implicit, start_mark, end_mark, flow_style=alse, comment=comment)
+        event = MappingStartEvent.new(anchor, tag, implicit, :start_mark => start_mark, :end_mark => end_mark, :flow_style => alse, :comment => comment)
         @.state = parse_block_mapping_first_key
       elsif anchor || tag
         # Empty scalars are allowed even if a tag or an anchor is specified.
-        event = ScalarEvent.new(anchor, tag, [implicit, false], '', start_mark, end_mark)
+        event = ScalarEvent.new(anchor, tag, [implicit, false], '', :start_mark => start_mark, :end_mark => end_mark)
         @state = @states.pop
       else
         if block
@@ -517,7 +523,7 @@ module SweetStreetYaml
       parse_block_sequence_entry
     end
 
-    def parse_block_sequence_entry
+    def parse_block_sequence_entry # checked
       if @scanner.check_token(BlockEntryToken)
         token = @scanner.get_token
         move_token_comment(token)
@@ -538,7 +544,7 @@ module SweetStreetYaml
             )
         end
         token = @scanner.get_token  # BlockEndToken
-        event = SequenceEndEvent.new(token.start_mark, token.end_mark, comment=token.comment)
+        event = SequenceEndEvent.new(:start_mark => token.start_mark, :end_mark => token.end_mark, :comment => token.comment)
         @state = @states.pop
         @marks.pop
         event
@@ -570,10 +576,10 @@ module SweetStreetYaml
         c = token.comment
         start_mark = token.start_mark
       else
-        start_mark = @last_event.end_mark  # type: ignore
-        c = distribute_comment(token.comment, start_mark.line)  # type: ignore
+        start_mark = @last_event.end_mark
+        c = distribute_comment(token.comment, start_mark.line)
       end
-      event = SequenceEndEvent.new(start_mark, start_mark, comment=c)
+      event = SequenceEndEvent.new(:start_mark => start_mark, :end_mark => start_mark, :comment => c)
       @state = @states.pop
       event
     end
@@ -589,7 +595,7 @@ module SweetStreetYaml
       parse_block_mapping_key
     end
 
-    def parse_block_mapping_key
+    def parse_block_mapping_key # checked
       if @scanner.check_token(KeyToken)
         token = @scanner.get_token
         move_token_comment(token)
@@ -602,7 +608,6 @@ module SweetStreetYaml
         end
       end
       resolver_processing_version = @resolver.processing_version
-      resolver_processing_version = 10 * resolver_processing_version[0] + resolver_processing_version[1]
       if (resolver_processing_version > Ruamel::MINIMUM_YAML_VERSION) && @scanner.check_token(ValueToken)
         @state = parse_block_mapping_value
         return process_empty_scalar(@scanner.peek_token.start_mark)
@@ -618,13 +623,13 @@ module SweetStreetYaml
       end
       token = @scanner.get_token
       move_token_comment(token)
-      event = MappingEndEvent.new(token.start_mark, token.end_mark, comment=token.comment)
+      event = MappingEndEvent.new(:start_mark => token.start_mark, :end_mark => token.end_mark, :comment => token.comment)
       @state = @states.pop
       @marks.pop
       event
     end
 
-    def parse_block_mapping_value
+    def parse_block_mapping_value # checked
       if @scanner.check_token(ValueToken)
         token = @scanner.get_token
         # value token might have post comment move it to e.g. block
@@ -633,7 +638,7 @@ module SweetStreetYaml
         else
           unless @scanner.check_token(KeyToken)
             move_token_comment(token, empty=true)
-          # else: empty value for this key cannot move token.comment
+          # else # empty value for this key cannot move token.comment
           end
         end
         if @scanner.check_token(KeyToken, ValueToken, BlockEndToken)
@@ -647,7 +652,7 @@ module SweetStreetYaml
               comment = [comment[0], nil]
             end
           end
-          return process_empty_scalar(token.end_mark, comment=comment)
+          return process_empty_scalar(token.end_mark, comment)
         end
       else
         @state = parse_block_mapping_key
@@ -670,7 +675,7 @@ module SweetStreetYaml
     def parse_flow_sequence_first_entry
       token = @scanner.get_token
       @marks.append(token.start_mark)
-      parse_flow_sequence_entry(first=true)
+      parse_flow_sequence_entry(true)
     end
 
     def parse_flow_sequence_entry(first = false)
@@ -691,7 +696,7 @@ module SweetStreetYaml
       end
       if @scanner.check_token(KeyToken)
         token = @scanner.peek_token
-        event = MappingStartEvent.new(nil, nil, true, token.start_mark, token.end_mark, flow_style=true)
+        event = MappingStartEvent.new(nil, nil, true, :start_mark => token.start_mark, :end_mark => token.end_mark, :flow_style => true)
         @state = parse_flow_sequence_entry_mapping_key
         return event
       elsif !@scanner.check_token(FlowSequenceEndToken)
@@ -699,7 +704,7 @@ module SweetStreetYaml
         return parse_flow_node
       end
       token = @scanner.get_token
-      event = SequenceEndEvent.new(token.start_mark, token.end_mark, comment=token.comment)
+      event = SequenceEndEvent.new(:start_mark => token.start_mark, :end_mark => token.end_mark, :comment => token.comment)
       @state = @states.pop
       @marks.pop
       event
@@ -736,7 +741,7 @@ module SweetStreetYaml
     def parse_flow_sequence_entry_mapping_end
       @state = parse_flow_sequence_entry
       token = @scanner.peek_token
-      MappingEndEvent.new(token.start_mark, token.start_mark)
+      MappingEndEvent.new(:start_mark => token.start_mark, :end_mark => token.start_mark)
     end
 
     # flow_mapping  ::= FLOW-MAPPING-START
@@ -751,7 +756,7 @@ module SweetStreetYaml
       parse_flow_mapping_key(true)
     end
 
-    def parse_flow_mapping_key(first = false)
+    def parse_flow_mapping_key(first = false) # checked
       unless @scanner.check_token(FlowMappingEndToken)
         unless first
           if @scanner.check_token(FlowEntryToken)
@@ -767,7 +772,6 @@ module SweetStreetYaml
           end
         end
         resolver_processing_version = @resolver.processing_version
-        resolver_processing_version = 10 * resolver_processing_version[0] + resolver_processing_version[1]
         if @scanner.check_token(KeyToken)
           token = @scanner.get_token
           if @scanner.check_token(ValueToken, FlowEntryToken, FlowMappingEndToken)
@@ -786,13 +790,13 @@ module SweetStreetYaml
         end
       end
       token = @scanner.get_token
-      event = MappingEndEvent.new(token.start_mark, token.end_mark, comment=token.comment)
+      event = MappingEndEvent.new(:start_mark => token.start_mark, :end_mark => token.end_mark, :comment => token.comment)
       @state = @states.pop
       @marks.pop
       event
     end
 
-    def parse_flow_mapping_value
+    def parse_flow_mapping_value # checked
       if @scanner.check_token(ValueToken)
         token = @scanner.get_token
         if @scanner.check_token(FlowEntryToken, FlowMappingEndToken)
@@ -809,13 +813,13 @@ module SweetStreetYaml
       end
     end
 
-    def parse_flow_mapping_empty_value
+    def parse_flow_mapping_empty_value # checked
       @state = parse_flow_mapping_key
       process_empty_scalar(@scanner.peek_token.start_mark)
     end
 
-    def process_empty_scalar(mark, comment = nil)
-      ScalarEvent.new(nil, nil, [true, false], '', mark, mark, comment=comment)
+    def process_empty_scalar(mark, comment = nil) # checked
+      ScalarEvent.new(nil, nil, [true, false], '', :start_mark => mark, :end_mark => mark, :comment => comment)
     end
 
     def move_token_comment(token, nt = nil, empty = false)
@@ -863,8 +867,7 @@ module SweetStreetYaml
     end
 
     def distribute_comment(comment, line)
-      return unless comment
-      return unless comment[0]
+      return unless comment&[0]
       raise "'comment[0][0]' is '#{comment[0][0]}'" unless comment[0][0] == line + 1
       typ = @loader.comment_handling & 0b11
       case typ

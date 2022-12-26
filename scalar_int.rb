@@ -3,7 +3,7 @@
 # frozen_string_literal: true
 
 # from ruamel.yaml.anchor import Anchor
-require 'anchor'
+require_relative './anchor'
 
 module SweetStreetYaml
   class ScalarInt
@@ -30,7 +30,7 @@ module SweetStreetYaml
       x
     }
 
-    define_method(://) { |a|
+    define_method('//') { |a|
       x = self.class.new((@integer / a).to_i)
       x._width = _width
       x._underscore = _underscore ? _underscore[0..-1] : nil

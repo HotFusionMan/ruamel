@@ -85,6 +85,8 @@ module SweetStreetYaml
       @stream = stream
     end
 
+    attr_reader :index, :column
+
     def reset_reader
       @name = nil
       @stream_pointer = 0
@@ -130,12 +132,11 @@ module SweetStreetYaml
     end
 
     def peek(index = 0)
-      begin
-        return @buffer[@pointer + @index]
-      rescue IndexError
-        update(@index + 1)
-        return @buffer[@pointer + @index]
-      end
+      peek_output = @buffer[@pointer + index]
+      return peek_output if peek_output
+
+      update(index + 1)
+      return @buffer[@pointer + index]
     end
 
     def prefix(length = 1)
@@ -245,7 +246,7 @@ module SweetStreetYaml
       @pointer = 0
       while @buffer.size < length
         update_raw unless @eof
-        unless @raw_decode.nil?
+        if @raw_decode
           begin
             data, converted = @raw_decode.call(@raw_buffer, 'strict', @eof)
           rescue UnicodeDecodeError => exc
@@ -282,9 +283,7 @@ module SweetStreetYaml
         @raw_buffer += data
       end
       @stream_pointer += data.size
-      if data.nil?
-        @eof = true
-      end
+      @eof = data.empty?
     end
   end
 end

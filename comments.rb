@@ -17,8 +17,8 @@ a separate base
 # from ruamel.yaml.scalarstring import ScalarString
 # from ruamel.yaml.anchor import Anchor
 
-require 'error'
-require 'tokens'
+require_relative './error'
+require_relative './tokens'
 
 require 'set'
 
@@ -56,6 +56,7 @@ module SweetStreetYaml
       @_idx.to_s
     end
   end
+
 
   # more or less in order of subjective expected likelyhood
   # the _POST and _PRE ones are lists themselves
@@ -169,8 +170,8 @@ module SweetStreetYaml
       x[pos]  # can be nil
     end
 
-    def set(item, pos, value)
-      x = @_items.get(item)
+    def set(item, pos, value) # checked
+      x = @_items.fetch(item)
       if x.nil?
         @_items[item] = x = Array.new(pos + 1, nil)
       else
@@ -201,6 +202,7 @@ module SweetStreetYaml
     end
   end
 
+
   # to distinguish key from nil
   def NoComment
   end
@@ -208,7 +210,7 @@ module SweetStreetYaml
 
   class Format
     attr_accessor :_flow_style
-    attrib = format_attrib
+    attrib = FORMAT_ATTRIB
 
     def initialize
       @_flow_style = nil
@@ -231,6 +233,7 @@ module SweetStreetYaml
     end
   end
 
+
   class LineCol
     "line and column information wrt document, values start at zero (0)"
 
@@ -244,7 +247,7 @@ module SweetStreetYaml
       @data = nil
     end
 
-    def add_kv_line_col(key, data)
+    def add_kv_line_col(key, data) # checked
       @data ||= {}
       @data[key] = data
     end
@@ -276,6 +279,7 @@ module SweetStreetYaml
     end
   end
 
+
   class Tag
     "store tag information for roundtripping"
 
@@ -294,21 +298,22 @@ module SweetStreetYaml
     end
   end
 
+
   class CommentedBase
-    def ca
+    def ca # checked
       instance_variable_set("@#{Comment.attrib}".to_sym, Comment.new) unless self.__send__(Comment.attrib)
 
       self.__send__(Comment.attrib)
     end
 
-    def yaml_end_comment_extend(comment, clear = false)
+    def yaml_end_comment_extend(comment, clear = false) # checked
       return unless comment
 
       ca._end = [] if clear || ca._end.nil?
       ca.end += comment
     end
 
-    def yaml_key_comment_extend(key, comment, clear = false)
+    def yaml_key_comment_extend(key, comment, clear = false) # checked
       ca.items.default = [nil, nil, nil, nil]
       r = ca.items[key]
       if clear || r[1].nil?
@@ -326,35 +331,35 @@ module SweetStreetYaml
       r = ca.items.default = [nil, nil, nil, nil]
       if clear || r[3].nil?
         if comment[1]
-          raise unless isinstance(comment[1].instance_of?(Array)
+          raise unless comment[1].instance_of?(Array)
         end
         r[3] = comment[1]
+      else
+        r[3] += comment[0]
       end
-    else
-      r[3] += (comment[0]
+      r[2] = comment[0]
     end
-    r[2] = comment[0]
-  end
 
-  def yaml_set_start_comment(comment, indent = 0)
-    "overwrites any preceding comment lines on an object
+    def yaml_set_start_comment(comment, indent = 0)
+      "overwrites any preceding comment lines on an object
         expects comment to be without `#` and possible have multiple lines
         "
-    # from .error import CommentMark
-    # from .tokens import CommentToken
+      # from .error import CommentMark
+      # from .tokens import CommentToken
 
-    pre_comments = _yaml_clear_pre_comment
-    comment.chomp!
-    start_mark = CommentMark.new(indent)
-    comment.split("\n").each do |com|
-      c = com.strip
-      com.prepend('# ') if c.size > 0 && c[0] != '#'
-      pre_comments.append(CommentToken.new(com + "\n", start_mark))
+      pre_comments = _yaml_clear_pre_comment
+      comment.chomp!
+      start_mark = CommentMark.new(indent)
+      comment.split("\n").each do |com|
+        c = com.strip
+        com.prepend('# ') if c.size > 0 && c[0] != '#'
+        pre_comments.append(CommentToken.new(com + "\n", start_mark))
+      end
     end
 
     def comment_token(s, mark)
       # handle empty lines as having no comment
-      CommentToken.new((s else ? '# ' : '') + s + "\n", mark)
+      CommentToken.new((s ? '# ' : '') + s + "\n", mark)
     end
 
     def yaml_set_comment_before_after_key(key, before = nil, indent = 0, after = nil, after_indent = nil)
@@ -426,7 +431,7 @@ module SweetStreetYaml
       _yaml_add_eol_comment(ct, :key => key)
     end
 
-    def lc
+    def lc # checked
       instance_variable_set("@#{LineCol.attrib}".to_sym, LineCol.new) unless self.__send__(LineCol.attrib)
       self.__send__(LineCol.attrib)
     end
@@ -436,7 +441,7 @@ module SweetStreetYaml
       lc.col = col
     end
 
-    def _yaml_set_kv_line_col(key, data)
+    def _yaml_set_kv_line_col(key, data) # checked
       lc.add_kv_line_col(key, data)
     end
 
@@ -494,6 +499,7 @@ module SweetStreetYaml
     end
   end
 
+
   class CommentedSeq < CommentedBase
     attr_accessor Comment.attrib.to_sym, :_lst
 
@@ -516,7 +522,7 @@ module SweetStreetYaml
     def delete(idx = nil)
       @_lst.delete(idx)
       ca.items.delete(idx)
-      sorted(ca.items.sort.each do |list_index|
+      ca.items.sort.each do |list_index|
         next if list_index < idx
         ca.items[list_index - 1] = ca.items.delete_at(list_index)
       end
@@ -530,7 +536,7 @@ module SweetStreetYaml
     def insert(idx, val)
       "the comments after the insertion have to move forward"
       @_lst.insert(idx, val)
-      sorted(ca.items.sort.reverse_each do |list_index|
+      ca.items.sort.reverse_each do |list_index|
         break if list_index < idx
         ca.items[list_index + 1] = ca.items.delete_at(list_index)
       end
@@ -544,7 +550,7 @@ module SweetStreetYaml
       @_lst.equal?(other)
     end
 
-    def _yaml_add_comment(comment, key = NoComment)
+    def _yaml_add_comment(comment, key = NoComment) # checked
       if key == NoComment
         ca.comment = comment
       else
@@ -573,11 +579,11 @@ module SweetStreetYaml
         # ca.items is not ordered
         self.each do |row_idx, _k1|
           break if row_idx >= key
-          next if row_idx not in ca.items
+          next unless ca.items.include?(row_idx)
           sel_idx = row_idx
         end
       end
-      if sel_idx !.nil?
+      if sel_idx
       column = _yaml_get_columnX(sel_idx)
       end
       column
@@ -644,7 +650,7 @@ module SweetStreetYaml
   class CommentedKeySeq#(tuple, CommentedBase)
     "This primarily exists to be able to roundtrip keys that are sequences"
 
-    def _yaml_add_comment(comment, key = NoComment)
+    def _yaml_add_comment(comment, key = NoComment) # checked
       if key == NoComment
         ca.comment = comment
       else
@@ -704,7 +710,7 @@ module SweetStreetYaml
     end
   end
 
-  class CommentedMapView < Sized
+  class CommentedMapView
     attr_accessor :_mapping
 
     def initialize(mapping)
@@ -728,7 +734,7 @@ module SweetStreetYaml
     end
 
     def each
-      @_mapping { |x| yield x }
+      @_mapping.each { |x| yield x }
     end
   end
 
@@ -775,7 +781,7 @@ module SweetStreetYaml
       @ordereddict = Hash[args]
     end
 
-    def _yaml_add_comment(comment, key = NoComment, value = NoComment)
+    def _yaml_add_comment(comment, key = NoComment, value = NoComment) # checked
       "values is set to key to indicate a value attachment of comment"
       unless key == NoComment
         yaml_key_comment_extend(key, comment)
@@ -918,7 +924,7 @@ module SweetStreetYaml
       # begin to preserve the scalarstring type if setting an existing key to a new value
       if self.has_key?(key)
         if value.instance_of?(String) &&
-          self[key],instance_of?(ScalarString)
+          self[key].instance_of?(ScalarString)
         value = self[key].class.new(value) end
       end
       @ordereddict[key] = value
@@ -962,12 +968,12 @@ module SweetStreetYaml
     def each
       @ordereddict.each_key { |x| yield x }
     end
-    alias :each :_keys
+    alias :_keys :each
 
     def size
       @ordereddict.size
     end
-    alias :size :length
+    alias :length :size
 
     def equal?(other)
       dict == other
@@ -982,7 +988,7 @@ module SweetStreetYaml
     end
 
     def _items
-      @ordereddict.each |k, v| { yield k, values }
+      @ordereddict.each { |k, v| yield k, v }
     end
 
     def items
@@ -991,6 +997,7 @@ module SweetStreetYaml
 
     def _merge
       @merge_attrib = [] unless defined?(@merge_attrib)
+      @merge_attrib
     end
 
     # def copy
@@ -999,13 +1006,13 @@ module SweetStreetYaml
         #     x[k] = v
         # copy_attributes(x)
         # return x
-    alias :dup :copy
+    alias :copy :dup
 
-    def add_referent(cm)
+    def add_referent(cm) # checked
       @_ref.append(cm) unless @_ref.include?(cm)
     end
 
-    def add_yaml_merge(value)
+    def add_yaml_merge(value) # checked
       value.each do |v|
         v[1].add_referent
         v[1].each do |k, v|
@@ -1014,7 +1021,7 @@ module SweetStreetYaml
           @ordereddict[k] = v
         end
       end
-      _merge.merge(value)
+      _merge += value # I hope this is correct. - ADC
     end
 
     def update_key_value(key)
@@ -1043,12 +1050,14 @@ module SweetStreetYaml
       end
       res
     end
+  end
 
 # based on brownie mappings
 # @classmethod
 # def raise_immutable(cls, *args, **kwargs)
 #     raise TypeError.new('{} objects are immutable'.format(cls.__name__))
 # end
+
 
   class CommentedKeyMap#CommentedBase, Mapping
     attr_accessor Comment.attrib.to_sym, :_od
@@ -1087,7 +1096,7 @@ module SweetStreetYaml
     def size
       @_od.size
     end
-    alias :size :length
+    alias :length :size
 
     def __hash__
       hash(to_a)
@@ -1105,7 +1114,7 @@ module SweetStreetYaml
       CommentedKeyMap.new(h)
     end
 
-    def _yaml_add_comment(comment, key = NoComment)
+    def _yaml_add_comment(comment, key = NoComment) # checked
       if key == NoComment
         ca.comment = comment
       else
@@ -1162,13 +1171,13 @@ module SweetStreetYaml
   class CommentedSet#(MutableSet, CommentedBase)
     attr_accessor Comment.attrib.to_sym, :odict
 
-    def initialize(values = nil)
-      @odict = ordereddict.new
-      @mutable_set = MutableSet.new
-      self |= values if values
+    def initialize(other_set = nil)
+      @odict = Hash.new
+      @mutable_set = Set.new
+      @mutable_set |= other_set if other_set
     end
 
-    def _yaml_add_comment(comment, key = NoComment, value = NoComment)
+    def _yaml_add_comment(comment, key = NoComment, value = NoComment) # checked
       "values is set to key to indicate a value attachment of comment"
       unless key == NoComment
         yaml_key_comment_extend(key, comment)
@@ -1227,6 +1236,7 @@ module SweetStreetYaml
       @value
     end
   end
+end
 
 
 =begin

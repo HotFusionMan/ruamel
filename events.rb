@@ -3,12 +3,12 @@
 # frozen_string_literal: true
 
 # from ruamel.yaml.compat import _F
-require 'compat'
+# require 'compat'
 
 # Abstract classes.
 
 
-def CommentCheck()
+def CommentCheck
 end
 
 module SweetStreetYaml
@@ -39,9 +39,9 @@ module SweetStreetYaml
         end
         ['anchor', 'tag', 'implicit', 'flow_style', 'style'].each do |key|
           v = __send__(key)
-          arguments.append(_F('{key!s}={v!r}', key=key, v=v)) if v
+          arguments.append("#{key}=#{v}") if v
         end
-        arguments.append('comment={!r}'.format(@comment)) unless [nil, CommentCheck].include?(comment)
+        arguments.append("comment=#{@comment}") unless [nil, CommentCheck].include?(comment)
         if SHOW_LINES
           arguments.append(
             '({}:{}/{}:{})'.format(
@@ -65,11 +65,7 @@ module SweetStreetYaml
         #     if comment  !in [nil, CommentCheck]
         #         arguments += ', comment={!r}'.format(comment)
       end
-      _F(
-        '{self_class_name!s}({arguments!s})',
-        self_class_name=__class__.__name__,
-        :arguments => arguments
-      )
+      "#{self.class.name}(#{arguments})"
     end
   end
 

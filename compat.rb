@@ -12,7 +12,7 @@
 # import collections.abc
 
 module SweetStreetYaml
-  _DEFAULT_YAML_VERSION = (1, 2)
+  _DEFAULT_YAML_VERSION = Gem::Version.new("1.2")
 
 
 # replace with f-strings when 3.5 support is dropped
@@ -210,3 +210,4 @@ module SweetStreetYaml
   #   def __delsingleitem__(self, index)
   #       # type: (Any) -> nil
   #       raise IndexError
+end

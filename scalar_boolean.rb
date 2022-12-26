@@ -10,11 +10,11 @@ bool.__bases__ is type 'int', so that is what is used as the basis for ScalarBoo
 You can use these in an if statement, but  !when testing equivalence
 "
 
-require 'anchor'
+require_relative './anchor'
 
 module SweetStreeYaml
   class ScalarBoolean
-    attr_accessor Anchor.attrib.to_sym, :integer
+    attr_accessor ::SweetStreetYaml::Anchor.attrib.to_sym, :integer
 
     def self.__new__(*args, **kw)
       _anchor = kw.delete('anchor')

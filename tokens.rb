@@ -3,11 +3,10 @@
 # frozen_string_literal: true
 
 # from ruamel.yaml.compat import _F, nprintf  # NOQA
-require 'compat'
+# require 'compat'
 
 module SweetStreetYaml
 SHOW_LINES = true
-
 
   class Token
     attr_accessor :start_mark, :end_mark, :_comment
@@ -100,7 +99,7 @@ SHOW_LINES = true
       return if target.instance_of?(StreamEndToken) || target.instance_of?(DocumentStartToken)
       @_comment = nil
       tc = target.comment
-      unless tc  # target comment, just insert
+      unless tc # target comment, just insert
         # special for empty value in key: value issue 25
         c = [c[0], c[1], nil, nil, c[0]] if empty
         target._comment = c
@@ -169,7 +168,7 @@ SHOW_LINES = true
 
 
   class DocumentEndToken < Token
-    attr_accessor :()
+    # attr_accessor :()
     @id = '<document end>'
   end
 

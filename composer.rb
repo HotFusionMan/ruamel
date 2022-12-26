@@ -53,7 +53,7 @@ module SweetStreeYaml
       @loader._resolver
     end
 
-    def check_node
+    def check_node # checked
       # Drop the STREAM-START event.
       parser.get_event if parser.check_event(StreamStartEvent)
 
@@ -61,12 +61,12 @@ module SweetStreeYaml
       parser.check_event(StreamEndEvent)
     end
     
-    def get_node
+    def get_node # checked
       # Get the root node of the next document.
       compose_document unless parser.check_event(StreamEndEvent)
     end
 
-    def get_single_node
+    def get_single_node # checked
       # Drop the STREAM-START event.
       parser.get_event
 
@@ -91,7 +91,7 @@ module SweetStreeYaml
       document
     end
 
-    def compose_document
+    def compose_document # checked
       # Drop the DOCUMENT-START event.
       parser.get_event
 
@@ -109,17 +109,17 @@ module SweetStreeYaml
       a
     end
 
-    def compose_node(parent, index)
+    def compose_node(parent, index) # checked
       if parser.check_event(AliasEvent)
         event = parser.get_event
         alias = event.anchor
         unless @anchors.has_key?(alias)
-        raise ComposerError.new(
-          nil,
-          nil,
-          _F('found undefined alias {alias!r}', alias=alias),
-          event.start_mark,
-        )
+          raise ComposerError.new(
+            nil,
+            nil,
+            _F('found undefined alias {alias!r}', alias=alias),
+            event.start_mark,
+          )
         end
         return_alias(@anchors[alias])
       end
@@ -146,15 +146,15 @@ module SweetStreeYaml
       node
     end
 
-    def compose_scalar_node(anchor)
+    def compose_scalar_node(anchor) # checked
       event = parser.get_event
       tag = event.tag
       tag = resolver.resolve(ScalarNode, event.value, event.implicit) if tag.nil? || tag == '!'
       node = ScalarNode.new(
         tag,
         event.value,
-        event.start_mark,
-        event.end_mark,
+        :start_mark => event.start_mark,
+        :end_mark => event.end_mark,
         :style => event.style,
         :comment => event.comment,
         :anchor => anchor
@@ -163,19 +163,19 @@ module SweetStreeYaml
       node
     end
 
-    def compose_sequence_node(anchor)
+    def compose_sequence_node(anchor) # checked
       start_event = parser.get_event
       tag = start_event.tag
       tag = resolver.resolve(SequenceNode, nil, start_event.implicit) if tag.nil? || tag == '!'
       node = SequenceNode.new(
         tag,
         [],
-        start_event.start_mark,
-        nil,
-        flow_style=start_event.flow_style,
-        comment=start_event.comment,
-        anchor=anchor,
-        )
+        :start_mark => start_event.start_mark,
+        :end_mark => nil,
+        :flow_style => start_event.flow_style,
+        :comment => start_event.comment,
+        :anchor => anchor
+      )
       @anchors[anchor] = node if anchor
       index = 0
       until parser.check_event(SequenceEndEvent)
@@ -191,19 +191,19 @@ module SweetStreeYaml
       node
     end
 
-    def compose_mapping_node(anchor)
+    def compose_mapping_node(anchor) # checked
       start_event = parser.get_event
       tag = start_event.tag
       tag = resolver.resolve(MappingNode, nil, start_event.implicit) if tag .nil? || tag == '!'
       node = MappingNode.new(
         tag,
         [],
-        start_event.start_mark,
-        nil,
-        flow_style=start_event.flow_style,
-        comment=start_event.comment,
-        anchor=anchor,
-        )
+        :start_mark => start_event.start_mark,
+        :end_mark => nil,
+        :flow_style => start_event.flow_style,
+        :comment => start_event.comment,
+        :anchor => anchor
+      )
       @anchors[anchor] = node if anchor
       until parser.check_event(MappingEndEvent)
         item_key = compose_node(node, nil)
@@ -216,13 +216,12 @@ module SweetStreeYaml
       node
     end
 
-    def check_end_doc_comment(end_event, node)
+    def check_end_doc_comment(end_event, node) # checked
       if end_event.comment&.fetch(1)
         # pre comments on an end_event, no following to move to
         node.comment = [nil, nil] unless node.comment
         raise if node.instance_of?(ScalarEvent)
-        # this is a post comment on a mapping node, add as third element
-        # in the list
+        # this is a post comment on a mapping node, add as third element in the list
         node.comment.append(end_event.comment[1])
         end_event.comment[1] = nil
       end

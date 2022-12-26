@@ -32,14 +32,38 @@ require 'tokens'
 require 'compat'
 
 module SweetStreetYaml
+  class SimpleKey
+    # See below simple keys treatment.
+    def initialize(token_number, required, index, line, column, mark)
+      @token_number = token_number
+      @required = required
+      @index = index
+      @line = line
+      @column = column
+      @mark = mark
+    end
+
+    attr_reader :token_number, :required, :index, :line, :column, :mark
+ end
+
   class Scanner
-    THE_END = "\n\0\r\x85\u2028\u2029"
-    THE_END_SPACE_TAB = " \n\0\t\r\x85\u2028\u2029"
+    ASCII_LINE_ENDING = "\r\n\x85"
+    UNICODE_LINE_ENDING = "\u2028\u2029"
+    LINE_ENDING = (ASCII_LINE_ENDING + UNICODE_LINE_ENDING).freeze
+    LINE_ENDINGS_REGEXP = Regexp.new(LINE_ENDING)
+    LINE_ENDING_SPACE = (LINE_ENDING + ' ').freeze
+    THE_END = (LINE_ENDING + "\0").freeze
+    THE_END_SPACE = (THE_END + ' ').freeze
+    THE_END_SPACE_QUOTE_BACKSLASH = (THE_END_SPACE + "\"'\\").freeze
     SPACE_TAB = " \t"
+    THE_END_SPACE_TAB = (THE_END + SPACE_TAB).freeze
+    THE_END_SPACE_TAB_COMMA_BRACKETS = (THE_END_SPACE_TAB + ',[]{}').freeze
     DIGITS = '0'..'9'.to_a.freeze
     UPPERCASE_LETTERS = 'A'..'Z'.to_a.freeze
     LOWERCASE_LETTERS = 'a'..'z'.to_a.freeze
     ALPHANUMERIC_CHARACTERS = (DIGITS + UPPERCASE_LETTERS + LOWERCASE_LETTERS).freeze
+    NON_ALPHANUMERIC_CHARACTERS = "\0 \t\r\n\x85\u2028\u2029?:,[]{}%@`"
+    PLUS_MINUS = '+-'
     ESCAPE_REPLACEMENTS = {
       '0' => "\0",
       'a' => "\x07",
@@ -81,6 +105,8 @@ module SweetStreetYaml
       @yaml_version = nil
     end
 
+    attr_reader :yaml_version
+
     def flow_level
       @flow_context.size
     end
@@ -91,7 +117,7 @@ module SweetStreetYaml
 
       # flow_context is an expanding/shrinking list consisting of '{' and '['
       # for each unclosed flow context. If empty list that means block context
-      @flow_context = []  # type: List[Text]
+      @flow_context = []
 
       # List of processed tokens that are not yet emitted.
       @tokens = []
@@ -106,7 +132,7 @@ module SweetStreetYaml
       @indent = -1
 
       # Past indentation levels.
-      @indents = []  # type: List[int]
+      @indents = []
 
       # Variables related to simple keys treatment.
 
@@ -136,7 +162,7 @@ module SweetStreetYaml
       #   (token_number, required, index, line, column, mark)
       # A simple key may start with ALIAS, ANCHOR, TAG, SCALAR(flow),
       # '[', or '{' tokens.
-      @possible_simple_keys = {}  # type: Dict[Any, Any]
+      @possible_simple_keys = {}
     end
 
     def reader
@@ -274,10 +300,10 @@ module SweetStreetYaml
       return fetch_tag if ch == '!'
 
       # Is it a literal scalar?
-      return fetch_literal if (ch == '|') && !flow_level
+      return fetch_literal if (ch == '|') && flow_level > 0
 
       # Is it a folded scalar?
-      return fetch_folded if (ch == '>') && !flow_level
+      return fetch_folded if (ch == '>') && flow_level > 0
 
       # Is it a single-quoted scalar?
       return fetch_single if ch == "'"
@@ -344,29 +370,20 @@ module SweetStreetYaml
       #   ALIAS, ANCHOR, TAG, SCALAR(flow), '[', and '{'.
 
       # Check if a simple key is required at the current position.
-      required = not self.flow_level and self.indent == self.reader.column
+      required = (flow_level != 0) && (@indent == reader.column)
 
-      # The next token might be a simple key. Let's save it's number and
-      # position.
+      # The next token might be a simple key. Let's save its number and position.
       if allow_simple_key
         remove_possible_simple_key
         token_number = @tokens_taken + @tokens.size
-        key = SimpleKey.new(
-          token_number,
-          required,
-          reader.index,
-          reader.line,
-          reader.column,
-          reader.get_mark
-        )
-        @possible_simple_keys[flow_level] = key
+        @possible_simple_keys[flow_level] = SimpleKey.new(token_number, required, reader.index, reader.line, reader.column, reader.get_mark)
       end
     end
 
     def remove_possible_simple_key
       # Remove the saved possible key position at the current flow level.
       if @possible_simple_keys.has_key?(flow_level)
-        key = self.possible_simple_keys[self.flow_level]
+        key = @possible_simple_keys[flow_level]
 
         if key.required
           raise ScannerError.new(
@@ -397,10 +414,8 @@ module SweetStreetYaml
       #             self.reader.get_mark())
 
       # In the flow context, indentation is ignored. We make the scanner less
-      # restrictive then specification requires.
-      if (flow_level == 0) ? false : true
-        return
-      end
+      # restrictive than specification requires.
+      return unless flow_level == 0
 
       # In block context, we may need to issue the BLOCK-END tokens.
       while @indent > column
@@ -432,7 +447,7 @@ module SweetStreetYaml
     end
 
     def fetch_stream_end
-      # Set the current intendation to -1.
+      # Set the current indentation to -1.
       unwind_indent(-1)
       # Reset simple keys.
       remove_possible_simple_key
@@ -494,7 +509,7 @@ module SweetStreetYaml
       # '[' and '{' may start a simple key.
       save_possible_simple_key
       # Increase the flow level.
-      flow_context.append(to_push)
+      @flow_context.append(to_push)
       # Simple keys are allowed after '[' and '{'.
       @allow_simple_key = true
       # Add FLOW-SEQUENCE-START or FLOW-MAPPING-START.
@@ -545,11 +560,9 @@ module SweetStreetYaml
 
     def fetch_block_entry
       # Block context needs additional checks.
-      unless flow_level.to_boolean
+      unless flow_level != 0
         # Are we allowed to start a new entry?
-        unless @allow_simple_key
-          raise ScannerError.new(nil, nil, 'sequence entries are not allowed here', reader.get_mark)
-        end
+        raise ScannerError.new(nil, nil, 'sequence entries are not allowed here', reader.get_mark) unless @allow_simple_key
         # We may need to add BLOCK-SEQUENCE-START.
         if add_indent(reader.column)
           mark = reader.get_mark
@@ -572,8 +585,7 @@ module SweetStreetYaml
 
     def fetch_key
       # Block context needs additional checks.
-      if not self.flow_level:
-
+      unless flow_level == 0
         # Are we allowed to start a key (not nessesary a simple)?
         raise ScannerError.new(nil, nil, 'mapping keys are not allowed here', reader.get_mark) unless @allow_simple_key
 
@@ -585,7 +597,7 @@ module SweetStreetYaml
       end
 
       # Simple keys are allowed after '?' in the block context.
-      @allow_simple_key = !(flow_level.to_boolean)
+      @allow_simple_key = (flow_level == 0)
 
       # Reset possible simple key on the current level.
       remove_possible_simple_key
@@ -598,10 +610,10 @@ module SweetStreetYaml
     end
 
     def fetch_value
-      flow_level_as_boolean = flow_level.to_boolean
+      flow_level_as_boolean = flow_level > 0
 
       # Do we determine a simple key?
-      if @possible_simple_keys.include?(flow_level)
+      if @possible_simple_keys.has_key?(flow_level)
         # Add KEY.
         key = @possible_simple_keys.delete(flow_level)
         @tokens.insert(key.token_number - @tokens_taken, KeyToken.new(key.mark, key.mark))
@@ -609,12 +621,7 @@ module SweetStreetYaml
         # If this key starts a new block mapping, we need to add
         # BLOCK-MAPPING-START.
         unless flow_level_as_boolean
-          if add_indent(key.column)
-            @tokens.insert(
-              key.token_number - @tokens_taken,
-              BlockMappingStartToken.new(key.mark, key.mark),
-              )
-          end
+          @tokens.insert(key.token_number - @tokens_taken, BlockMappingStartToken.new(key.mark, key.mark)) if add_indent(key.column)
         end
         # There cannot be two simple keys one after another.
         @allow_simple_key = false
@@ -625,7 +632,6 @@ module SweetStreetYaml
         # (Do we really need them? They will be caught by the parser
         # anyway.)
         unless flow_level_as_boolean
-
           # We are allowed to start a complex value if and only if
           # we can start a simple key.
           unless @allow_simple_key
@@ -644,12 +650,12 @@ module SweetStreetYaml
         unless flow_level_as_boolean
           if add_indent(reader.column)
             mark = reader.get_mark
-            @tokens.append(BlockMappingStartToken,new(mark, mark))
+            @tokens.append(BlockMappingStartToken.new(mark, mark))
           end
         end
 
         # Simple keys are allowed after ':' in the block context.
-        @allow_simple_key = !(flow_level_as_boolean)
+        @allow_simple_key = !flow_level_as_boolean
 
         # Reset possible simple key on the current level.
         remove_possible_simple_key
@@ -686,7 +692,7 @@ module SweetStreetYaml
       # No simple keys after TAG.
       @allow_simple_key = false
       # Scan and add TAG.
-      @tokens.append(scan_tag())
+      @tokens.append(scan_tag)
     end
 
     def fetch_literal
@@ -759,7 +765,7 @@ module SweetStreetYaml
 
     def check_key
       # KEY(flow context):    '?'
-      return true if flow_level.to_boolean
+      return true if flow_level != 0
 
       # KEY(block context):   '?' (' '|'\n')
       THE_END_SPACE_TAB.include?(reader.peek(1))
@@ -850,10 +856,10 @@ module SweetStreetYaml
             reader.forward
           end
         end
-        if scan_line_break
-          @allow_simple_key = true unless flow_level > 0
-        else
+        if scan_line_break.empty?
           found = true
+        else
+          @allow_simple_key = true unless flow_level > 0
         end
       end
       nil
@@ -890,7 +896,7 @@ module SweetStreetYaml
         length += 1
         ch = reader.peek(length)
       end
-      unless length.to_boolean
+      unless length > 0
         raise ScannerError.new(
           'while scanning a directive',
           start_mark,
@@ -901,7 +907,7 @@ module SweetStreetYaml
       value = reader.prefix(length)
       reader.forward(length)
       ch = reader.peek
-      unless "\0 \r\n\x85\u2028\u2029".include?(ch)
+      unless THE_END_SPACE_TAB.include?(ch)
         raise ScannerError.new(
           'while scanning a directive',
           start_mark,
@@ -928,7 +934,7 @@ module SweetStreetYaml
       end
       reader.forward
       minor = scan_yaml_directive_number(start_mark)
-      unless "\0 \r\n\x85\u2028\u2029".include?(reader.peek)
+      unless THE_END_SPACE_TAB.include?(reader.peek)
         raise ScannerError.new(
           'while scanning a directive',
           start_mark,
@@ -936,8 +942,7 @@ module SweetStreetYaml
           reader.get_mark,
           )
       end
-      # yaml_version =
-      [major, minor]
+      @yaml_version = Gem::Version.new("#{major}.#{minor}")
     end
 
     def scan_yaml_directive_number(start_mark)
@@ -992,7 +997,7 @@ module SweetStreetYaml
       # See the specification for details.
       value = scan_tag_uri('directive', start_mark)
       ch = reader.peek
-      unless "\0 \r\n\x85\u2028\u2029".include?(ch)
+      unless THE_END_SPACE_TAB.include?(ch)
         raise ScannerError.new(
           'while scanning a directive',
           start_mark,
@@ -1044,13 +1049,11 @@ module SweetStreetYaml
       reader.forward
       length = 0
       ch = reader.peek(length)
-      # while '0' <= ch <= '9' or 'A' <= ch <= 'Z' or 'a' <= ch <= 'z' \
-      #         or ch in '-_'
       while SweetStreetYaml.check_anchorname_char(ch)
         length += 1
         ch = reader.peek(length)
       end
-      unless length.to_boolean
+      unless length > 0
         raise ScannerError.new(
           _F('while scanning an {name!s}', name=name),
           start_mark,
@@ -1060,10 +1063,7 @@ module SweetStreetYaml
       end
       value = reader.prefix(length)
       reader.forward(length)
-      # ch1 = ch
-      # ch = reader.peek   # no need to peek, ch is already set
-      # assert ch1 == ch
-      unless "\0 \t\r\n\x85\u2028\u2029?:,[]{}%@`".include?(ch)
+      unless NON_ALPHANUMERIC_CHARACTERS.include?(ch)
         raise ScannerError.new(
           _F('while scanning an {name!s}', name=name),
           start_mark,
@@ -1088,7 +1088,7 @@ module SweetStreetYaml
             'while parsing a tag',
             start_mark,
             _F("expected '>', but found {srp_call!r}", srp_call=reader.peek),
-            reader.get_mark,
+            reader.get_mark
             )
         end
         reader.forward
@@ -1099,7 +1099,7 @@ module SweetStreetYaml
       else
         length = 1
         use_handle = false
-        until "\0 \r\n\x85\u2028\u2029".include?(ch)
+        until THE_END_SPACE_TAB.include?(ch)
           if ch == '!'
             use_handle = true
             break
@@ -1117,12 +1117,12 @@ module SweetStreetYaml
         suffix = scan_tag_uri('tag', start_mark)
       end
       ch = reader.peek
-      unless "\0 \r\n\x85\u2028\u2029".include?(ch)
+      unless THE_END_SPACE_TAB.include?(ch)
         raise ScannerError.new(
           'while scanning a tag',
           start_mark,
           _F("expected ' ', but found {ch!r}", ch=ch),
-          reader.get_mark,
+          reader.get_mark
           )
       end
       value = [handle, suffix]
@@ -1147,15 +1147,25 @@ module SweetStreetYaml
       min_indent = @indent + 1
       if increment.nil?
         # no increment and top level, min_indent could be 0
+
+         if min_indent < 1 and (
+              style not in '|>'
+              or (self.scanner_processing_version == (1, 1))
+              and getattr(
+                  self.loader, 'top_level_block_style_scalar_no_indent_error_1_1', False
+              )
+          )
+
         if min_indent < 1 &&
           (!'|>'.include?(style)
-          || (scanner_processing_version == [1, 1])
-          && @loader.__send__('top_level_block_style_scalar_no_indent_error_1_1')
+            ||
+            ((scanner_processing_version == VERSION_1_1)
+              && @loader.__send__('top_level_block_style_scalar_no_indent_error_1_1'))
           )
           min_indent = 1
         end
         breaks, max_indent, end_mark = scan_block_scalar_indentation
-        indent = max(min_indent, max_indent)
+        indent = [min_indent, max_indent].max
       else
         if min_indent < 1
           min_indent = 1
@@ -1168,7 +1178,7 @@ module SweetStreetYaml
       # Scan the inner part of the block scalar.
       while reader.column == indent && reader.peek != "\0"
         chunks.extend(breaks)
-        leading_non_space = !" \t".include?(reader.peek)
+        leading_non_space = !SPACE_TAB.include?(reader.peek)
         length = 0
         until THE_END.include?(reader.peek(length))
           length += 1
@@ -1180,9 +1190,7 @@ module SweetStreetYaml
         if '|>'.include?(style) && min_indent == 0
           # at the beginning of a line, if in block style see if
           # end of document/start_new_document
-          if check_document_start or check_document_end
-            break
-          end
+          break if check_document_start || check_document_end
         end
 
         if reader.column == indent && reader.peek != "\0"
@@ -1190,27 +1198,27 @@ module SweetStreetYaml
           #
           # This is the folding according to the specification
 
-          if rt && folded && line_break == "\n"
-            chunks.append("\a")
-          end
-          if folded && line_break == "\n" && leading_non_space && !" \t".include?(reader.peek)
+          chunks.append("\a") if rt && folded && line_break == "\n"
+          if folded && line_break == "\n" && leading_non_space && !SPACE_TAB.include?(reader.peek)
             if breaks.empty?
               chunks.append(' ')
             end
           else
             chunks.append(line_break)
 
-            # This is Clark Evans's interpretation (also in the spec
-            # examples)
+            # This is Clark Evans's interpretation (also in the spec examples)
             #
-            # if folded and line_break == '\n'
-            #     if not breaks
-            #         if reader.peek not in ' \t'
-            #             chunks.append(' ')
-            #         else
-            #             chunks.append(line_break)
+            # if folded && line_break == "\n"
+            #   if breaks.empty?
+            #     if !" \t".include?(reader.peek)
+            #         chunks.append(' ')
+            #     else
+            #         chunks.append(line_break)
+            #     end
+            #   end
             # else
-            #     chunks.append(line_break)
+            #   chunks.append(line_break)
+            # end
           end
         else
           break
@@ -1220,13 +1228,11 @@ module SweetStreetYaml
       # Process trailing line breaks. The 'chomping' setting determines
       # whether they are included in the value.
       trailing = []
-      if [nil, true].include?(chomping)
-        chunks.append(line_break)
-      end
+      chunks.append(line_break) if NIL_OR_TRUE.include?(chomping)
       if chomping == true
-        chunks.extend(breaks)
-      elsif [nil, false].include?(chomping)
-        trailing.extend(breaks)
+        chunks += breaks
+      elsif NIL_OR_FALSE.include?(chomping)
+        trailing += breaks
       end
 
       # We are done.
@@ -1234,7 +1240,7 @@ module SweetStreetYaml
       unless @loader.nil?
         comment_handler = @loader.__send__('comment_handling')
         if comment_handler.nil?
-          unless block_scalar_comment>nil?
+          unless block_scalar_comment.nil?
             token.add_comment_pre([block_scalar_comment])
           end
         end
@@ -1277,46 +1283,28 @@ module SweetStreetYaml
       chomping = nil
       increment = nil
       ch = reader.peek
-      if '+-'.include?(ch)
+      if PLUS_MINUS.include?(ch)
         chomping = (ch == '+')
         reader.forward
         ch = reader.peek
+        _check_indentation(ch, start_mark)
+      else
+        _check_indentation(ch, start_mark)
         if DIGITS.include?(ch)
-          increment = ch.to_i
-          if increment == 0
-            raise ScannerError.new(
-              'while scanning a block scalar',
-              start_mark,
-              'expected indentation indicator in the range 1-9, ' 'but found 0',
-              reader.get_mark,
-              )
+          ch = reader.peek
+          if PLUS_MINUS.include?(ch)
+            chomping = (ch == '+')
           end
           reader.forward
         end
-      elsif DIGITS.include?(ch)
-        increment = ch.to_i
-        if increment == 0
-          raise ScannerError.new(
-            'while scanning a block scalar',
-            start_mark,
-            'expected indentation indicator in the range 1-9, ' 'but found 0',
-            reader.get_mark,
-            )
-        end
-        reader.forward
-        ch = reader.peek
-        if '+-'.include?(ch)
-          chomping = (ch == '+')
-        end
-        reader.forward
       end
       ch = reader.peek
-      unless "\0 \r\n\x85\u2028\u2029".include?(ch)
+      unless THE_END_SPACE_TAB.include?(ch)
         raise ScannerError.new(
           'while scanning a block scalar',
           start_mark,
           _F('expected chomping or indentation indicators, but found {ch!r}', ch=ch),
-          reader.get_mark,
+          reader.get_mark
           )
       end
       [chomping, increment]
@@ -1324,7 +1312,7 @@ module SweetStreetYaml
 
     def scan_block_scalar_ignored_line(start_mark)
       # See the specification for details.
-      prefix = ''
+      prefix = +''
       comment = nil
       while reader.peek == ' '
         prefix += reader.peek
@@ -1343,7 +1331,7 @@ module SweetStreetYaml
           'while scanning a block scalar',
           start_mark,
           _F('expected a comment or a line break, but found {ch!r}', ch=ch),
-          reader.get_mark,
+          reader.get_mark
           )
       end
       scan_line_break
@@ -1355,7 +1343,7 @@ module SweetStreetYaml
       chunks = []
       max_indent = 0
       end_mark = reader.get_mark
-      while " \r\n\x85\u2028\u2029".include?(reader.peek)
+      while LINE_ENDING.include?(reader.peek)
         if reader.peek == ' '
           reader.forward
           if reader.column > max_indent
@@ -1376,7 +1364,7 @@ module SweetStreetYaml
       while reader.column < indent && reader.peek == ' '
         reader.forward
       end
-      while "\r\n\x85\u2028\u2029".include?(reader.peek)
+      while LINE_ENDING.include?(reader.peek)
         chunks.append(scan_line_break)
         end_mark = reader.get_mark
         while reader.column < indent && reader.peek == ' '
@@ -1393,28 +1381,28 @@ module SweetStreetYaml
       # mark the beginning and the end of them. Therefore we are less
       # restrictive then the specification requires. We only need to check
       # that document separators are not included in scalars.
-      double = (style == '"')
+      double_quoted = (style == '"')
 
       chunks = []
       start_mark = reader.get_mark
       quote = reader.peek
       reader.forward
-      chunks.extend(scan_flow_scalar_non_spaces(double, start_mark))
+      chunks += scan_flow_scalar_non_spaces(double_quoted, start_mark)
       until reader.peek == quote
-        chunks += scan_flow_scalar_spaces(double, start_mark)
-        chunks += scan_flow_scalar_non_spaces(double, start_mark)
+        chunks += scan_flow_scalar_spaces(double_quoted, start_mark)
+        chunks += scan_flow_scalar_non_spaces(double_quoted, start_mark)
       end
       reader.forward
       end_mark = reader.get_mark
-      ScalarToken.new("".join(chunks), false, start_mark, end_mark, style)
+      ScalarToken.new(chunks.join, false, start_mark, end_mark, style)
     end
 
-    def scan_flow_scalar_non_spaces(double, start_mark)
+    def scan_flow_scalar_non_spaces(double_quoted, start_mark)
       # See the specification for details.
       chunks = []
       loop do
         length = 0
-        until " \n\"'\\\0\t\r\x85\u2028\u2029".include?(reader.peek(length))
+        until THE_END_SPACE_QUOTE_BACKSLASH.include?(reader.peek(length))
           length += 1
         end
         unless length == 0
@@ -1422,19 +1410,19 @@ module SweetStreetYaml
           reader.forward(length)
         end
         ch = reader.peek
-        if !double && ch == "'" && reader.peek(1) == "'"
+        if !double_quoted && ch == "'" && reader.peek(1) == "'"
           chunks.append("'")
           reader.forward(2)
-        elsif (double && ch == "'") || (!double && '"\\'.include?(ch))
+        elsif (double_quoted && ch == "'") || (!double_quoted && '"\\'.include?(ch))
           chunks.append(ch)
           reader.forward
-        elsif double && ch == '\\'
+        elsif double_quoted && ch == '\\'
           reader.forward
           ch = reader.peek
-          if ESCAPE_REPLACEMENTS.include?(ch)
+          if ESCAPE_REPLACEMENTS.has_key?(ch)
             chunks.append(ESCAPE_REPLACEMENTS[ch])
             reader.forward
-          elsif ESCAPE_CODES.include?(ch)
+          elsif ESCAPE_CODES.has_key?(ch)
             length = ESCAPE_CODES[ch]
             reader.forward
             0.upto(length - 1) do |i|
@@ -1455,9 +1443,9 @@ module SweetStreetYaml
             code = reader.prefix(length).to_i(16)
             chunks.append(code.chr)
             reader.forward(length)
-          elsif "\n\r\x85\u2028\u2029".include?(ch)
+          elsif LINE_ENDING.include?(ch)
             scan_line_break
-            chunks += scan_flow_scalar_breaks(double, start_mark)
+            chunks += scan_flow_scalar_breaks(double_quoted, start_mark)
           else
             raise ScannerError.new(
               'while scanning a double-quoted scalar',
@@ -1472,19 +1460,18 @@ module SweetStreetYaml
       end
     end
 
-    LINE_ENDINGS_REGEXP = Regexp.new("\r\n\x85\u2028\u2029")
-    def scan_flow_scalar_spaces(double, start_mark)
+    def scan_flow_scalar_spaces(double_quoted, start_mark)
       # See the specification for details.
       chunks = []
       length = 0
-      while " \t".include?(reader.peek(length))
+      while SPACE_TAB.include?(reader.peek(length))
         length += 1
       end
       whitespaces = reader.prefix(length)
       reader.forward(length)
       ch = reader.peek
       case ch
-        when"\0"
+        when "\0"
           raise ScannerError.new(
             'while scanning a quoted scalar',
             start_mark,
@@ -1493,7 +1480,7 @@ module SweetStreetYaml
             )
         when LINE_ENDINGS_REGEXP
           line_break = scan_line_break
-          breaks = scan_flow_scalar_breaks(double, start_mark)
+          breaks = scan_flow_scalar_breaks(double_quoted, start_mark)
           if line_break != "\n"
             chunks.append(line_break)
           elsif breaks.empty?
@@ -1511,8 +1498,7 @@ module SweetStreetYaml
       # See the specification for details.
       chunks = []
       loop do
-        # Instead of checking indentation, we check for document
-        # separators.
+        # Instead of checking indentation, we check for document separators.
         prefix = reader.prefix(3)
         if (prefix == '---' || prefix == '...') && THE_END_SPACE_TAB.include?(reader.peek(3))
           raise ScannerError.new(
@@ -1522,10 +1508,10 @@ module SweetStreetYaml
             reader.get_mark,
             )
         end
-        while " \t".include?(reader.peek)
+        while SPACE_TAB.include?(reader.peek)
           reader.forward
         end
-        if "\r\n\x85\u2028\u2029".include?(reader.peek)
+        if LINE_ENDING.include?(reader.peek)
           chunks.append(scan_line_break)
         else
           return chunks
@@ -1547,24 +1533,23 @@ module SweetStreetYaml
       # document separators at the beginning of the line.
       # if indent == 0
       #     indent = 1
-      spaces = []  # type: List[Any]
+      spaces = []
       loop do
         length = 0
         break if reader.peek == '#'
         loop do
           ch = reader.peek(length)
-          if ch == ':' &&  !THE_END_SPACE_TAB.include?(reader.peek(length + 1))
-            next
-          elsif ch == '?' && scanner_processing_version != [1, 1]
-            next
-          elsif (
-          THE_END_SPACE_TAB.include?(ch)
-          || (
-          !flow_level.to_boolean &&
-            ch == ':' &&
-            THE_END_SPACE_TAB.include?(reader.peek(length + 1))
-          )
-          || (flow_level.to_boolean && ',:?[]{}'.include?(ch))
+          next if ch == ':' && !THE_END_SPACE_TAB.include?(reader.peek(length + 1))
+          next if ch == '?' && scanner_processing_version != VERSION_1_1
+
+          if (
+            THE_END_SPACE_TAB.include?(ch)
+            || (
+              flow_level == 0 &&
+              ch == ':' &&
+              THE_END_SPACE_TAB.include?(reader.peek(length + 1))
+            )
+            || (flow_level > 0 && ',:?[]{}'.include?(ch))
           )
             break
           end
@@ -1572,9 +1557,9 @@ module SweetStreetYaml
         end
         # It's not clear what we should do with ':' in the flow context.
         if (
-        flow_level.to_boolean &&
+          flow_level > 0 &&
           ch == ':' &&
-          !"\0 \t\r\n\x85\u2028\u2029,[]{}".include?(reader.peek(length + 1))
+          !THE_END_SPACE_TAB_COMMA_BRACKETS.include?(reader.peek(length + 1))
         )
           reader.forward(length)
           raise ScannerError.new(
@@ -1583,8 +1568,8 @@ module SweetStreetYaml
             "found unexpected ':'",
             reader.get_mark,
             'Please check '
-          'http://pyyaml.org/wiki/YAMLColonInFlowContext '
-          'for details.',
+            'http://pyyaml.org/wiki/YAMLColonInFlowContext '
+            'for details.',
           )
         end
         break if length == 0
@@ -1595,9 +1580,9 @@ module SweetStreetYaml
         end_mark = reader.get_mark
         spaces = scan_plain_spaces(indent, start_mark)
         if (
-        spaces.empty? ||
+          spaces.empty? ||
           reader.peek == '#' ||
-          (!flow_level.to_boolean && reader.column < indent)
+          (flow_level == 0 && reader.column < indent)
         )
           break
         end
@@ -1611,7 +1596,7 @@ module SweetStreetYaml
         if comment_handler.nil?
           if spaces[0] == "\n"
             # Create a comment token to preserve the trailing line breaks.
-            comment = CommentToken.new("".join(spaces) + "\n", start_mark, end_mark)
+            comment = CommentToken.new(spaces.join + "\n", start_mark, end_mark)
             token.add_comment_post(comment)
           end
         elsif comment_handler != false
@@ -1640,13 +1625,13 @@ module SweetStreetYaml
       whitespaces = reader.prefix(length)
       reader.forward(length)
       ch = reader.peek
-      if "\r\n\x85\u2028\u2029".include?(ch)
+      if LINE_ENDING.include?(ch)
         line_break = scan_line_break
         @allow_simple_key = true
         prefix = reader.prefix(3)
         return if (prefix == '---' || prefix == '...') && THE_END_SPACE_TAB.include?(reader.peek(3))
         breaks = []
-        while " \r\n\x85\u2028\u2029".include?(reader.peek)
+        while LINE_ENDING_SPACE.include?(reader.peek)
           if reader.peek == ' '
             reader.forward
           else
@@ -1713,7 +1698,7 @@ module SweetStreetYaml
       while (
         ALPHANUMERIC_CHARACTERS.include?(ch) ||
         "-;/?:@&=+$,_.!~*'()[]%".include?(ch) ||
-        ((scanner_processing_version > [10 * 1, 1]) && ch == '#')
+        (ch == '#' && (scanner_processing_version > VERSION_1_1))
       )
         if ch == '%'
           chunks.append(reader.prefix(length))
@@ -1734,7 +1719,7 @@ module SweetStreetYaml
             _F('while parsing an {name!s}', name=name),
             start_mark,
             _F('expected URI, but found {ch!r}', ch=ch),
-            reader.get_mark,
+            reader.get_mark
             )
         end
       end
@@ -1749,7 +1734,7 @@ module SweetStreetYaml
       while reader.peek == '%'
         reader.forward
         0.upto(1) { |k|
-          unless '0123456789ABCDEFabcdef'.include?(reader.peek(k))
+          unless ALPHANUMERIC_CHARACTERS.include?(reader.peek(k))
             raise ScannerError.new(
               _F('while scanning an {name!s}', name=name),
               start_mark,
@@ -1758,7 +1743,7 @@ module SweetStreetYaml
             ' but found {srp_call!r}',
               srp_call=reader.peek(k),
             ),
-              reader.get_mark,
+              reader.get_mark
             )
           end
         }
@@ -1766,7 +1751,7 @@ module SweetStreetYaml
         reader.forward(2)
       end
       begin
-        value = code_bytes.bytes.encode('UTF-8')
+        value = code_bytes.join.encode!('UTF-8')
       rescue UnicodeDecodeError => exc
         raise ScannerError.new(
           _F('while scanning an {name!s}', name=name), start_mark, str(exc), mark
@@ -1786,20 +1771,35 @@ module SweetStreetYaml
       #   '\u2029     :   '\u2029'
       #   default     :   ''
       ch = reader.peek
-      if "\r\n\x85".include?(ch)
+      if ASCII_LINE_ENDING.include?(ch)
         if reader.prefix(2) == "\r\n"
           reader.forward(2)
         else
           reader.forward
         end
         return "\n"
-      elsif "\u2028\u2029".include?(ch)
+      elsif UNICODE_LINE_ENDING.include?(ch)
         reader.forward
         return ch
       end
 
       ''
     end
+
+    private
+
+    def _check_indentation(ch, start_mark)
+      if DIGITS.include?(ch)
+        if ch.to_i == 0
+          raise ScannerError.new(
+            'while scanning a block scalar',
+            start_mark,
+            'expected indentation indicator in the range 1-9, ' 'but found 0',
+            reader.get_mark
+          )
+        end
+        reader.forward
+      end
   end
 
   class RoundTripScanner < Scanner
@@ -1913,7 +1913,9 @@ module SweetStreetYaml
     end
 
     def fetch_comment(comment)
-      value, start_mark, end_mark = comment
+      value = comment[0]
+      start_mark = comment[1]
+      end_mark = comment[2]
       while value&.last == ' '
         # empty line within indented key context
         # no need to update end-mark, that is not used
@@ -2018,14 +2020,14 @@ module SweetStreetYaml
       #   '\u2029     :   '\u2029'
       #   default     :   ''
       ch = reader.peek
-      if "\r\n\x85".include?(ch)
+      if ASCII_LINE_ENDING.include?(ch)
         if reader.prefix(2) == "\r\n"
           reader.forward(2)
         else
           reader.forward
         end
         return "\n"
-      elsif "\u2028\u2029".include?(ch)
+      elsif UNICODE_LINE_ENDING.include?(ch)
         reader.forward
         return ch
       elsif empty_line && "\t ".include?(ch)

@@ -20,11 +20,11 @@
 # )
 # from ruamel.yaml.nodes import MappingNode, ScalarNode, SequenceNode
 
-require 'compat'
-require 'error'
-require 'events'
-require 'nodes'
-require 'util'
+# require 'compat'
+require_relative './error'
+require_relative './events'
+require_relative './nodes'
+require_relative './util'
 
 module SweetStreetYaml
   class SerializerError < YAMLError
@@ -237,7 +237,7 @@ module SweetStreetYaml
             serialize_node(key, node, nil)
             serialize_node(value, node, key)
           end
-          emitter.emit(MappingEndEvent.new(: comment => [map_comment, end_comment]))
+          emitter.emit(MappingEndEvent.new(:comment => [map_comment, end_comment]))
         end
         resolver.ascend_resolver
       end
@@ -245,7 +245,7 @@ module SweetStreetYaml
   end
 
 
-  def templated_id(s)
+  def templated_id(s) # checked
     Serializer.ANCHOR_RE.match(s)
   end
   module_function :templated_id

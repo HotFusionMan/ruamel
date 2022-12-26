@@ -3,7 +3,7 @@
 # frozen_string_literal: true
 
 # from ruamel.yaml.anchor import Anchor
-require 'anchor'
+require_relative './anchor'
 
 module SweetStreetYaml
   class Float
@@ -46,7 +46,7 @@ module SweetStreetYaml
       # return x
     }
 
-    define_method(://) { |a|
+    define_method('//') { |a|
       return (@float / a).to_i
       # x = type(self // a)
       # x._width = _width

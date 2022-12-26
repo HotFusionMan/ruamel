@@ -55,12 +55,12 @@ UnsafeLoader = Loader
 
 module SweetStreetYaml
   class YAML
-    def initialize(*, typ: nil, pure: false, output: nil, plug_ins: nil)  # input: nil,
+    def initialize(*, typ: nil, pure: true)#, output: nil, plug_ins: nil)  # input: nil,
       # typ: 'rt'/nil -> RoundTripLoader/RoundTripDumper,  (default)
       #      'safe'    -> SafeLoader/SafeDumper,
       #      'unsafe'  -> normal/unsafe Loader/Dumper
       #      'base'    -> baseloader
-      # pure: if true only use Python modules
+      # pure: if true only use Ruby code
       # input/output: needed to work as context manager
       # plug_ins: a list of plug-in files
 
@@ -73,8 +73,8 @@ module SweetStreetYaml
       @pure = pure
 
       # @_input = input
-      @_output = output
-      @_context_manager = nil
+      # @_output = output
+      # @_context_manager = nil
 
       @plug_ins = []
       # for pu in ([] if plug_ins .nil? else plug_ins) + official_plug_ins
@@ -183,18 +183,20 @@ module SweetStreetYaml
       end
     end
 
+    attr_reader :version
+
     def reader
-      @_reader ||= Reader.new(nil, loader=self)
+      @_reader ||= @Reader.new(nil, self)
     end
 
     def scanner
-      @_scanner ||= Scanner(loader=self)
+      @_scanner ||= @Scanner.new(self)
     end
 
     def parser
       unless @_parser
-        if Parser != CParser
-          @_parser = Parser.new(:loader => self)
+        if @Parser != :CParser
+          @_parser = @Parser.new(self)
         else
           if @_parser.nil?
             # wait for the stream
@@ -213,8 +215,8 @@ module SweetStreetYaml
 
     def constructor
       unless @_constructor
-        cnst = Constructor.new(:preserve_quotes => preserve_quotes, :loader => self)
-        cnst.allow_duplicate_keys = allow_duplicate_keys
+        cnst = @Constructor.new(:preserve_quotes => preserve_quotes, :loader => self)
+        cnst.allow_duplicate_keys = @allow_duplicate_keys
         @_constructor = cnst
       end
       @_constructor
@@ -367,10 +369,10 @@ module SweetStreetYaml
 
     def load(stream)
       # at this point you either have the non-pure Parser (which has its own reader and
-      # scanner) || you have the pure Parser.
-      # If the pure Parser is set, then set the Reader && Scanner, if  !already set.
-      # If either the Scanner || Reader are set, you cannot use the non-pure Parser,
-      #     so reset it to the pure parser && set the Reader resp. Scanner if necessary
+      # scanner) or you have the pure Parser.
+      # If the pure Parser is set, then set the Reader && Scanner, if not already set.
+      # If either the Scanner or Reader are set, you cannot use the non-pure Parser,
+      #     so reset it to the pure parser and set the Reader resp. Scanner if necessary
       return load(stream.open('rb')) if !stream.respond_to?('read') && stream.respond_to?('open')
 
       my_constructor, my_parser = get_constructor_parser(stream)
@@ -417,10 +419,11 @@ module SweetStreetYaml
 
     def get_constructor_parser(stream)
       # the old cyaml needs special setup, and therefore the stream
-      if Parser != CParser
-        Reader = Reader if Reader.nil?
-        Scanner = Scanner if Scanner .nil?
+      if @Parser != :CParser
+        @Reader = Reader if @Reader.nil?
+        @Scanner = Scanner if @Scanner.nil?
         reader.stream = stream
+=begin
       else
         if Reader
           Scanner ||= Scanner
@@ -452,6 +455,7 @@ module SweetStreetYaml
           my_loader = XLoader(stream)
           return my_loader, my_loader
         end
+=end
       end
       return constructor, parser
     end
