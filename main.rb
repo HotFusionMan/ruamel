@@ -44,7 +44,7 @@ require_relative './dumper'
 require_relative './resolver'
 require_relative './representer'
 require_relative './constructor'
-# require_relative './compat'
+require_relative './scanner'
 
 
 
@@ -56,15 +56,14 @@ module SweetStreetYaml
   UnsafeLoader = Loader
 
   class YAML
+    # typ: 'rt'/nil -> RoundTripLoader/RoundTripDumper,  (default)
+    #      'safe'    -> SafeLoader/SafeDumper,
+    #      'unsafe'  -> normal/unsafe Loader/Dumper
+    #      'base'    -> baseloader
+    # pure: if true only use Ruby code
+    # input/output: needed to work as context manager
+    # plug_ins: a list of plug-in files
     def initialize(*, typ: nil, pure: true)#, output: nil, plug_ins: nil)  # input: nil,
-      # typ: 'rt'/nil -> RoundTripLoader/RoundTripDumper,  (default)
-      #      'safe'    -> SafeLoader/SafeDumper,
-      #      'unsafe'  -> normal/unsafe Loader/Dumper
-      #      'base'    -> baseloader
-      # pure: if true only use Ruby code
-      # input/output: needed to work as context manager
-      # plug_ins: a list of plug-in files
-
       @typ =
         if typ.nil?
           ['rt']
@@ -93,7 +92,7 @@ module SweetStreetYaml
       @comment_handling = nil
       @typ_found = 1
       @setup_rt = false
-      if typ.include?('rt')
+      if @typ.include?('rt')
         @setup_rt = true
       elsif typ.include?('safe')
         @Emitter = (@pure || CEmitter.nil?) ? Emitter : CEmitter

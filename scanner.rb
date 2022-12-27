@@ -1780,673 +1780,673 @@ module SweetStreetYaml
         reader.forward
       end
     end
+  end
 
-    class RoundTripScanner < Scanner
-      def check_token(*choices)
-        # Check if the next token is one of the given types.
-        while need_more_tokens
-          fetch_more_tokens
-        end
-        _gather_comments
-        if @tokens.size > 0
-          return true if choices.empty?
-          choices.each { |choice| return true if @tokens[0].instance_of?(choice) }
-        end
-        false
+  class RoundTripScanner < Scanner
+    def check_token(*choices)
+      # Check if the next token is one of the given types.
+      while need_more_tokens
+        fetch_more_tokens
       end
-
-      def peek_token
-        # Return the next token, but do not delete if from the queue.
-        while need_more_tokens
-          fetch_more_tokens
-        end
-        _gather_comments
-        return @tokens[0] if @tokens.size > 0
+      _gather_comments
+      if @tokens.size > 0
+        return true if choices.empty?
+        choices.each { |choice| return true if @tokens[0].instance_of?(choice) }
       end
+      false
+    end
 
-      def _gather_comments
-        # combine multiple comment lines and assign to next non-comment-token
-        comments = []
+    def peek_token
+      # Return the next token, but do not delete if from the queue.
+      while need_more_tokens
+        fetch_more_tokens
+      end
+      _gather_comments
+      return @tokens[0] if @tokens.size > 0
+    end
+
+    def _gather_comments
+      # combine multiple comment lines and assign to next non-comment-token
+      comments = []
+      return comments if @tokens.empty?
+      if @tokens[0].intance_of?(CommentToken)
+        comment = @tokens.pop(0)
+        @tokens_taken += 1
+        comments.append(comment)
+      end
+      while need_more_tokens
+        fetch_more_tokens
         return comments if @tokens.empty?
-        if @tokens[0].intance_of?(CommentToken)
-          comment = @tokens.pop(0)
+        if @tokens[0].instance_of?(CommentToken)
           @tokens_taken += 1
+          comment = @tokens.pop(0)
           comments.append(comment)
         end
-        while need_more_tokens
-          fetch_more_tokens
-          return comments if @tokens.empty?
-          if @tokens[0].instance_of?(CommentToken)
-            @tokens_taken += 1
-            comment = @tokens.pop(0)
-            comments.append(comment)
-          end
-        end
-        if comments.size >= 1
-          @tokens[0].add_comment_pre(comments)
-        end
-        # pull in post comment on e.g. ':'
-        if !@done && @tokens.size < 2
-          fetch_more_tokens
-        end
       end
+      if comments.size >= 1
+        @tokens[0].add_comment_pre(comments)
+      end
+      # pull in post comment on e.g. ':'
+      if !@done && @tokens.size < 2
+        fetch_more_tokens
+      end
+    end
 
-      def get_token
-        # Return the next token.
-        while need_more_tokens
-          fetch_more_tokens
-        end
-        _gather_comments
-        if @tokens.size > 0
-          # only add post comment to single line tokens
-          # scalar, value token. FlowXEndToken, otherwise
-          # hidden streamtokens could get them (leave them and they will be
-          # pre comments for the next map/seq
-          if (
-          @tokens.size > 1 &&
-            (
-            @tokens[0].instance_of?(ScalarToken) ||
-              @tokens[0].instance_of?(ValueToken) ||
-              @tokens[0].instance_of?(FlowSequenceEndToken) ||
-              @tokens[0].instance_of?(FlowMappingEndToken)
-            ) &&
-            @tokens[1].instance_of?(CommentToken) &&
-            @tokens[0].end_mark.line == @tokens[1].start_mark.line
-          )
-            @tokens_taken += 1
-            c = @tokens.pop(1)
-            fetch_more_tokens
-            while @tokens.size > 1 && @tokens[1].instance_of?(CommentToken)
-              @tokens_taken += 1
-              c1 = @tokens.pop(1)
-              c.value = c.value + (' ' * c1.start_mark.column) + c1.value
-              fetch_more_tokens
-            end
-            @tokens[0].add_comment_post(c)
-          elsif (
-          @tokens.size > 1 &&
-            @tokens[0].instance_of?(ScalarToken) &&
-            @tokens[1].instance_of?(CommentToken) &&
-            @tokens[0].end_mark.line != @tokens[1].start_mark.line
-          )
-            @tokens_taken += 1
-            c = @tokens.pop(1)
-            c.value = (
-            '\n' * (c.start_mark.line - @tokens[0].end_mark.line)
-            + (' ' * c.start_mark.column)
-            + c.value
-            )
-            @tokens[0].add_comment_post(c)
-            fetch_more_tokens
-            while len(@tokens) > 1 and isinstance(@tokens[1], CommentToken)
-              @tokens_taken += 1
-              c1 = @tokens.pop(1)
-              c.value = c.value + (' ' * c1.start_mark.column) + c1.value
-              fetch_more_tokens
-            end
-          end
+    def get_token
+      # Return the next token.
+      while need_more_tokens
+        fetch_more_tokens
+      end
+      _gather_comments
+      if @tokens.size > 0
+        # only add post comment to single line tokens
+        # scalar, value token. FlowXEndToken, otherwise
+        # hidden streamtokens could get them (leave them and they will be
+        # pre comments for the next map/seq
+        if (
+        @tokens.size > 1 &&
+          (
+          @tokens[0].instance_of?(ScalarToken) ||
+            @tokens[0].instance_of?(ValueToken) ||
+            @tokens[0].instance_of?(FlowSequenceEndToken) ||
+            @tokens[0].instance_of?(FlowMappingEndToken)
+          ) &&
+          @tokens[1].instance_of?(CommentToken) &&
+          @tokens[0].end_mark.line == @tokens[1].start_mark.line
+        )
           @tokens_taken += 1
-          return @tokens.pop(0)
+          c = @tokens.pop(1)
+          fetch_more_tokens
+          while @tokens.size > 1 && @tokens[1].instance_of?(CommentToken)
+            @tokens_taken += 1
+            c1 = @tokens.pop(1)
+            c.value = c.value + (' ' * c1.start_mark.column) + c1.value
+            fetch_more_tokens
+          end
+          @tokens[0].add_comment_post(c)
+        elsif (
+        @tokens.size > 1 &&
+          @tokens[0].instance_of?(ScalarToken) &&
+          @tokens[1].instance_of?(CommentToken) &&
+          @tokens[0].end_mark.line != @tokens[1].start_mark.line
+        )
+          @tokens_taken += 1
+          c = @tokens.pop(1)
+          c.value = (
+          '\n' * (c.start_mark.line - @tokens[0].end_mark.line)
+          + (' ' * c.start_mark.column)
+          + c.value
+          )
+          @tokens[0].add_comment_post(c)
+          fetch_more_tokens
+          while len(@tokens) > 1 and isinstance(@tokens[1], CommentToken)
+            @tokens_taken += 1
+            c1 = @tokens.pop(1)
+            c.value = c.value + (' ' * c1.start_mark.column) + c1.value
+            fetch_more_tokens
+          end
         end
-        # return nil
+        @tokens_taken += 1
+        return @tokens.pop(0)
       end
+      # return nil
+    end
 
-      def fetch_comment(comment)
-        value = comment[0]
-        start_mark = comment[1]
-        end_mark = comment[2]
-        while value&.last == ' '
-          # empty line within indented key context
-          # no need to update end-mark, that is not used
-          value.chop!
-        end
-        @tokens.append(CommentToken.new(value, start_mark, end_mark))
+    def fetch_comment(comment)
+      value = comment[0]
+      start_mark = comment[1]
+      end_mark = comment[2]
+      while value&.last == ' '
+        # empty line within indented key context
+        # no need to update end-mark, that is not used
+        value.chop!
       end
+      @tokens.append(CommentToken.new(value, start_mark, end_mark))
+    end
 
-      # scanner
+    # scanner
 
-      def scan_to_next_token
-        # We ignore spaces, line breaks and comments.
-        # If we find a line break in the block context, we set the flag
-        # `allow_simple_key` on.
-        # The byte order mark is stripped if it's the first character in the
-        # stream. We do not yet support BOM inside the stream as the
-        # specification requires. Any such mark will be considered as a part
-        # of the document.
-        #
-        # TODO: We need to make tab handling rules more sane. A good rule is
-        #   Tabs cannot precede tokens
-        #   BLOCK-SEQUENCE-START, BLOCK-MAPPING-START, BLOCK-END,
-        #   KEY(block), VALUE(block), BLOCK-ENTRY
-        # So the checking code is
-        #   if <TAB>
-        #       @allow_simple_keys = false
-        # We also need to add the check for `allow_simple_keys == true` to
-        # `unwind_indent` before issuing BLOCK-END.
-        # Scanners for block, flow, and plain scalars need to be modified.
+    def scan_to_next_token
+      # We ignore spaces, line breaks and comments.
+      # If we find a line break in the block context, we set the flag
+      # `allow_simple_key` on.
+      # The byte order mark is stripped if it's the first character in the
+      # stream. We do not yet support BOM inside the stream as the
+      # specification requires. Any such mark will be considered as a part
+      # of the document.
+      #
+      # TODO: We need to make tab handling rules more sane. A good rule is
+      #   Tabs cannot precede tokens
+      #   BLOCK-SEQUENCE-START, BLOCK-MAPPING-START, BLOCK-END,
+      #   KEY(block), VALUE(block), BLOCK-ENTRY
+      # So the checking code is
+      #   if <TAB>
+      #       @allow_simple_keys = false
+      # We also need to add the check for `allow_simple_keys == true` to
+      # `unwind_indent` before issuing BLOCK-END.
+      # Scanners for block, flow, and plain scalars need to be modified.
 
-        if reader.index == 0 && reader.peek == "\uFEFF"
+      if reader.index == 0 && reader.peek == "\uFEFF"
+        reader.forward
+      end
+      found = false
+      until found
+        while reader.peek == ' '
           reader.forward
         end
-        found = false
-        until found
-          while reader.peek == ' '
-            reader.forward
-          end
-          ch = reader.peek
-          if ch == '#'
-            start_mark = reader.get_mark
-            comment = ch
-            reader.forward
-            until THE_END.include?(ch)
-              ch = reader.peek
-              if ch == "\0"  # don't gobble the end-of-stream character
-                # but add an explicit newline as "YAML processors should terminate
-                # the stream with an explicit line break
-                # https://yaml.org/spec/1.2/spec.html#id2780069
-                comment += "\n"
-                break
-              end
-              comment += ch
-              reader.forward
-            end
-            # gather any blank lines following the comment too
-            ch = scan_line_break
-            while ch.sie > 0
-              comment += ch
-              ch = scan_line_break
-            end
-            end_mark = reader.get_mark
-            unless flow_level.to_boolean
-              @allow_simple_key = true
-            end
-            return comment, start_mark, end_mark
-          end
-          if scan_line_break == ''
-            found = true
-          else
-            start_mark = reader.get_mark
-            unless flow_level.to_boolean
-              @allow_simple_key = true
-            end
-            ch = reader.peek
-            if ch == "\n"  # empty toplevel lines
-              start_mark = reader.get_mark
-              comment = +""
-              until ch.empty?
-                ch = scan_line_break(empty_line=true)
-                comment += ch
-              end
-              if reader.peek == '#'
-                # empty line followed by indented real comment
-                comment = comment[0...comment.rindex("\n")] + "\n"
-              end
-              end_mark = reader.get_mark
-              return comment, start_mark, end_mark
-            end
-          end
-        end
-        # return nil
-      end
-
-      def scan_line_break(empty_line = false)
-        # Transforms
-        #   '\r\n'      :   '\n'
-        #   '\r'        :   '\n'
-        #   '\n'        :   '\n'
-        #   '\u{9b}'      :   '\n'
-        #   '\u2028'    :   '\u2028'
-        #   '\u2029     :   '\u2029'
-        #   default     :   ''
         ch = reader.peek
-        if ASCII_LINE_ENDING.include?(ch)
-          if reader.prefix(2) == "\r\n"
-            reader.forward(2)
-          else
+        if ch == '#'
+          start_mark = reader.get_mark
+          comment = ch
+          reader.forward
+          until THE_END.include?(ch)
+            ch = reader.peek
+            if ch == "\0"  # don't gobble the end-of-stream character
+              # but add an explicit newline as "YAML processors should terminate
+              # the stream with an explicit line break
+              # https://yaml.org/spec/1.2/spec.html#id2780069
+              comment += "\n"
+              break
+            end
+            comment += ch
             reader.forward
           end
-          return "\n"
-        elsif UNICODE_LINE_ENDING.include?(ch)
-          reader.forward
-          return ch
-        elsif empty_line && "\t ".include?(ch)
-          reader.forward
-          return ch
+          # gather any blank lines following the comment too
+          ch = scan_line_break
+          while ch.sie > 0
+            comment += ch
+            ch = scan_line_break
+          end
+          end_mark = reader.get_mark
+          unless flow_level.to_boolean
+            @allow_simple_key = true
+          end
+          return comment, start_mark, end_mark
         end
-
-        ''
-      end
-
-      def scan_block_scalar(style, rt = true)
-        super
-      end
-    end
-
-    # commenthandling 2021, differentiatiation not needed
-
-    VALUECMNT = 0
-    KEYCMNT = 0  # 1
-    # TAGCMNT = 2
-    # ANCHORCMNT = 3
-
-
-    class CommentBase
-      attr_accessor :line, :column, :value, :uline, :used, :fline, :ufun, :function
-
-      def initialize(value, line, column)
-        @value = value
-        @line = line
-        @column = column
-        @used = ' '
-        # info = inspect.getframeinfo(
-        #   inspect.stack()[3][0] # list of named tuples FrameInfo(frame, filename, lineno, function, code_context, index) is returned
-        # ) # Traceback(filename, lineno, function, code_context, index) is returned
-        _info = caller(3)[0] # "prog:13:in `<main>'"
-        @function = _info[_info.rindex('`')..._info.rindex("'")] # info.function
-        index_of_first_colon = _info.index( ':' )
-        index_of_second_colon = _info.index( ':', index_of_first_colon )
-        @fline = _info[index_of_first_colon...index_of_second_colon] # info.lineno
-        @ufun = nil
-        @uline = nil
-      end
-
-      def set_used(v = '+')
-        @used = v
-        # info = inspect.getframeinfo(inspect.stack()[1][0])
-        _info = caller(1)[0]
-        @ufun = _info[_info.rindex('`')..._info.rindex("'")] # info.function
-        @uline = _info[index_of_first_colon...index_of_second_colon] # info.lineno
-      end
-
-      def set_assigned
-        @used = '|'
-      end
-
-      def to_s
-        "#{@value}"
-      end
-
-      def inspect
-        "#{@value}"
-      end
-    end
-
-
-    class EOLComment < CommentBase
-      @@name = 'EOLC'
-    end
-
-
-    class FullLineComment < CommentBase
-      @@name = 'FULL'
-    end
-
-
-    class BlankLineComment < CommentBase
-      @@name = 'BLNK'
-    end
-
-
-    class ScannedComments
-      def initialize
-        @comments = {}
-        @unused = []
-      end
-
-      def add_eol_comment(comment, column, line)
-        if comment.count("\n") == 1
-          raise unless comment[-1] == "\n"
+        if scan_line_break == ''
+          found = true
         else
-          raise unless comment.include?("\n")
-        end
-        @comments[line] = retval = EOLComment.new(comment[0...-1], line, column)
-        @unused.append(line)
-        retval
-      end
-
-      def add_blank_line(comment, column, line)
-        # info = inspect.getframeinfo(inspect.stack()[1][0])
-        raise unless (comment.count("\n") == 1 && comment[-1] == "\n")
-        raise if @comments.include?(line)
-        @comments[line] = retval = BlankLineComment.new(comment[0...-1], line, column)
-        @unused.append(line)
-        retval
-      end
-
-      def add_full_line_comment(comment, column, line)
-        assert comment.count('\n') == 1 and comment[-1] == '\n'
-        @comments[line] = retval = FullLineComment.new(comment[0...-1], line, column)
-        @unused.append(line)
-        retval
-      end
-
-      def [](idx)
-        @comments[idx]
-      end
-
-      def to_str
-        "ParsedComments:\n  "
-        +
-        @comments.items.map { |lineno, x| "#{lineno} #{x.info}" }.join("\n  ")
-        + "\n"
-      end
-
-      def last
-        lineno, x = @comments.items.to_a[-1]
-        "#{lineno} {x.info}\n"
-      end
-
-      def any_unprocessed
-        # ToDo: might want to differentiate based on lineno
-        @unused.size > 0
-        # for lno, comment in reversed(@comments.items())
-        #    if comment.used == ' '
-        #        return true
-        # return false
-      end
-
-      def unprocessed(use = false)
-        while @unused.size > 0
-          first = use ? @unused.pop(0) : @unused[0]
-          # info = inspect.getframeinfo(inspect.stack()[1][0])
-          # xprintf('using', first, @comments[first].value, info.function, info.lineno)
-          yield first, @comments[first]
-          if use
-            @comments[first].set_used
-          end
-        end
-      end
-
-      def assign_pre(token)
-        token_line = token.start_mark.line
-        # info = inspect.getframeinfo(inspect.stack()[1][0])
-        # xprintf('assign_pre', token_line, @unused, info.function, info.lineno)
-        gobbled = false
-        while !@unused.empty? && @unused[0] < token_line
-          gobbled = true
-          first = @unused.pop(0)
-          # xprintf('assign_pre < ', first)
-          @comments[first].set_used()
-          token.add_comment_pre(first)
-        end
-        gobbled
-      end
-
-      def assign_eol(tokens)
-        return unless comment_line = @unused&.first
-
-        return unless @comments[comment_line].instance(EOLComment)
-
-        idx = 1
-        _token = tokens[-idx]
-        while _token.start_mark.line > comment_line || _token.instance_of?( ValueToken)
-          idx += 1
-        end
-        # xprintf('idx1', idx)
-        return if
-          tokens.size > idx &&
-            tokens[-idx].instance_of?(ScalarToken) &&
-            tokens[-(idx + 1)].instance_of?(ScalarToken)
-
-        begin
-          if tokens[-idx].instance(ScalarToken) && tokens[-(idx + 1)].instance_of?(KeyToken)
-            begin
-              eol_idx = @unused.pop(0)
-              @comments[eol_idx].set_used
-              # xprintf('>>>>>a', idx, eol_idx, KEYCMNT)
-              tokens[-idx].add_comment_eol(eol_idx, KEYCMNT)
-            rescue IndexError
-              raise NotImplementedError
-            end
-            return
-          end
-        rescue IndexError
-          # xprintf('IndexError1')
-        end
-
-        begin
-          if tokens[-idx].instance_of?(ScalarToken) &&
-            ((_token = tokens[-(idx + 1)]).instance_of?(ValueToken) || _token.instance_of?(BlockEntryToken))
-            begin
-              eol_idx = @unused.pop(0)
-              @comments[eol_idx].set_used()
-              tokens[-idx].add_comment_eol(eol_idx, VALUECMNT)
-            rescue IndexError
-              raise NotImplementedError
-            end
-            return
-          end
-        rescue IndexError
-          # xprintf('IndexError2')
-        end
-
-        # for t in tokens
-        #     xprintf('tt-', t)
-        # xprintf('not implemented EOL', type(tokens[-idx]))
-        # import sys
-
-        exit(0)
-      end
-
-      def assign_post(token)
-        token_line = token.start_mark.line
-        # info = inspect.getframeinfo(inspect.stack()[1][0])
-        # xprintf('assign_post', token_line, @unused, info.function, info.lineno)
-        gobbled = false
-        while !@unused.empty? && @unused[0] < token_line
-          gobbled = true
-          first = @unused.pop(0)
-          # xprintf('assign_post < ', first)
-          @comments[first].set_used()
-          token.add_comment_post(first)
-        end
-        gobbled
-      end
-
-      def str_unprocessed
-        (
-        @comments.items.map { |ind, x| "  #{ind} #{x.info}\n" } if x.used == ' '
-        ).join
-      end
-    end
-
-
-    class RoundTripScannerSC < Scanner  # RoundTripScanner Split Comments
-      def initialize(*arg, **kw)
-        super(*arg, **kw)
-        raise if @loader.nil?
-        # comments isinitialised on .need_more_tokens and persist on
-        # @loader.parsed_comments
-        @comments = nil
-      end
-
-      def get_token
-        # Return the next token.
-        while need_more_tokens
-          fetch_more_tokens
-        end
-        if @tokens.size > 0
-          if (_token = @tokens[0]).instance_of?(BlockEndToken)
-            @comments.assign_post(_token)
-          else
-            @comments.assign_pre(_token)
-          end
-          @tokens_taken += 1
-          @tokens.pop(0)
-        end
-      end
-
-      def need_more_tokens
-        if @comments.nil?
-          @loader.parsed_comments = @comments = ScannedComments.new
-        end
-        return false if @done
-
-        return true if @tokens.empty?
-
-        # The current token may be a potential simple key, so we
-        # need to look further.
-        stale_possible_simple_keys
-        return true if next_possible_simple_key == @tokens_taken
-
-        return true if @tokens.size < 2
-
-        first_token = @tokens[0]
-        return true if first_token.start_mark.line == @tokens[-1].start_mark.line
-
-        # if true
-        #     xprintf('-x--', len(@tokens))
-        #     for t in @tokens
-        #         xprintf(t)
-        #     # xprintf(@comments.last())
-        #     xprintf(@comments.str_unprocessed())  # type: ignore
-        @comments.assign_pre(first_token)
-        @comments.assign_eol(@tokens)
-      end
-
-      def scan_to_next_token
-        if reader.index == 0 && reader.peek == "\uFEFF"
-          reader.forward
-        end
-        start_mark = reader.get_mark
-        # xprintf('current_mark', start_mark.line, start_mark.column)
-        found = false
-        until found
-          while reader.peek == ' '
-            reader.forward
-          end
-          ch = reader.peek
-          if ch == '#'
-            comment_start_mark = reader.get_mark
-            comment = ch
-            reader.forward  # skip the '#'
-            until THE_END.include?(ch)
-              ch = reader.peek
-              if ch == "\0"  # don't gobble the end-of-stream character
-                # but add an explicit newline as "YAML processors should terminate
-                # the stream with an explicit line break
-                # https://yaml.org/spec/1.2/spec.html#id2780069
-                comment += "\n"
-                break
-              end
-              comment += ch
-              reader.forward
-            end
-            # we have a comment
-            if start_mark.column == 0
-              @comments.add_full_line_comment(comment, comment_start_mark.column, comment_start_mark.line)
-            else
-              @comments.add_eol_comment(comment, comment_start_mark.column, comment_start_mark.line)
-              comment = ''
-            end
-            # gather any blank lines or full line comments following the comment as well
-            scan_empty_or_full_line_comments
-            @allow_simple_key = true unless flow_level.to_boolean
-            return
-          end
-          if scan_line_break.to_boolean
-            # start_mark = reader.get_mark
-            @allow_simple_key = true unless flow_level.to_boolean
-            scan_empty_or_full_line_comments
-            return nil
+          start_mark = reader.get_mark
+          unless flow_level.to_boolean
+            @allow_simple_key = true
           end
           ch = reader.peek
           if ch == "\n"  # empty toplevel lines
             start_mark = reader.get_mark
             comment = +""
-            while ch
-              ch = scan_line_break(true)
+            until ch.empty?
+              ch = scan_line_break(empty_line=true)
               comment += ch
             end
             if reader.peek == '#'
               # empty line followed by indented real comment
               comment = comment[0...comment.rindex("\n")] + "\n"
             end
-            _ = reader.get_mark  # gobble end_mark
-            return nil
-          else
-            found = true
+            end_mark = reader.get_mark
+            return comment, start_mark, end_mark
           end
         end
-        # return nil
+      end
+      # return nil
+    end
+
+    def scan_line_break(empty_line = false)
+      # Transforms
+      #   '\r\n'      :   '\n'
+      #   '\r'        :   '\n'
+      #   '\n'        :   '\n'
+      #   '\u{9b}'      :   '\n'
+      #   '\u2028'    :   '\u2028'
+      #   '\u2029     :   '\u2029'
+      #   default     :   ''
+      ch = reader.peek
+      if ASCII_LINE_ENDING.include?(ch)
+        if reader.prefix(2) == "\r\n"
+          reader.forward(2)
+        else
+          reader.forward
+        end
+        return "\n"
+      elsif UNICODE_LINE_ENDING.include?(ch)
+        reader.forward
+        return ch
+      elsif empty_line && "\t ".include?(ch)
+        reader.forward
+        return ch
       end
 
-      def scan_empty_or_full_line_comments
-        blmark = reader.get_mark
-        assert blmark.column == 0
-        blanks = +""
-        comment = nil
-        mark = nil
-        ch = reader.peek
-        loop do
-          # nprint('ch', repr(ch), reader.get_mark.column)
-          if "\r\n\u{9b}\u2028\u2029".include?(ch)
-            if reader.prefix(2) == "\r\n"
-              reader.forward(2)
-            else
-              reader.forward
-            end
-            if comment.nil?
-              blanks += "\n"
-              @comments.add_blank_line(blanks, blmark.column, blmark.line)
-            else
-              comment += "\n"
-              @comments.add_full_line_comment(comment, mark.column, mark.line)
-              comment = nil
-            end
-            blanks = +""
-            blmark = reader.get_mark
-            ch = reader.peek
-            next
+      ''
+    end
+
+    def scan_block_scalar(style, rt = true)
+      super
+    end
+  end
+
+  # commenthandling 2021, differentiatiation not needed
+
+  VALUECMNT = 0
+  KEYCMNT = 0  # 1
+  # TAGCMNT = 2
+  # ANCHORCMNT = 3
+
+
+  class CommentBase
+    attr_accessor :line, :column, :value, :uline, :used, :fline, :ufun, :function
+
+    def initialize(value, line, column)
+      @value = value
+      @line = line
+      @column = column
+      @used = ' '
+      # info = inspect.getframeinfo(
+      #   inspect.stack()[3][0] # list of named tuples FrameInfo(frame, filename, lineno, function, code_context, index) is returned
+      # ) # Traceback(filename, lineno, function, code_context, index) is returned
+      _info = caller(3)[0] # "prog:13:in `<main>'"
+      @function = _info[_info.rindex('`')..._info.rindex("'")] # info.function
+      index_of_first_colon = _info.index( ':' )
+      index_of_second_colon = _info.index( ':', index_of_first_colon )
+      @fline = _info[index_of_first_colon...index_of_second_colon] # info.lineno
+      @ufun = nil
+      @uline = nil
+    end
+
+    def set_used(v = '+')
+      @used = v
+      # info = inspect.getframeinfo(inspect.stack()[1][0])
+      _info = caller(1)[0]
+      @ufun = _info[_info.rindex('`')..._info.rindex("'")] # info.function
+      @uline = _info[index_of_first_colon...index_of_second_colon] # info.lineno
+    end
+
+    def set_assigned
+      @used = '|'
+    end
+
+    def to_s
+      "#{@value}"
+    end
+
+    def inspect
+      "#{@value}"
+    end
+  end
+
+
+  class EOLComment < CommentBase
+    @@name = 'EOLC'
+  end
+
+
+  class FullLineComment < CommentBase
+    @@name = 'FULL'
+  end
+
+
+  class BlankLineComment < CommentBase
+    @@name = 'BLNK'
+  end
+
+
+  class ScannedComments
+    def initialize
+      @comments = {}
+      @unused = []
+    end
+
+    def add_eol_comment(comment, column, line)
+      if comment.count("\n") == 1
+        raise unless comment[-1] == "\n"
+      else
+        raise unless comment.include?("\n")
+      end
+      @comments[line] = retval = EOLComment.new(comment[0...-1], line, column)
+      @unused.append(line)
+      retval
+    end
+
+    def add_blank_line(comment, column, line)
+      # info = inspect.getframeinfo(inspect.stack()[1][0])
+      raise unless (comment.count("\n") == 1 && comment[-1] == "\n")
+      raise if @comments.include?(line)
+      @comments[line] = retval = BlankLineComment.new(comment[0...-1], line, column)
+      @unused.append(line)
+      retval
+    end
+
+    def add_full_line_comment(comment, column, line)
+      assert comment.count('\n') == 1 and comment[-1] == '\n'
+      @comments[line] = retval = FullLineComment.new(comment[0...-1], line, column)
+      @unused.append(line)
+      retval
+    end
+
+    def [](idx)
+      @comments[idx]
+    end
+
+    def to_str
+      "ParsedComments:\n  "
+      +
+      @comments.items.map { |lineno, x| "#{lineno} #{x.info}" }.join("\n  ")
+      + "\n"
+    end
+
+    def last
+      lineno, x = @comments.items.to_a[-1]
+      "#{lineno} {x.info}\n"
+    end
+
+    def any_unprocessed
+      # ToDo: might want to differentiate based on lineno
+      @unused.size > 0
+      # for lno, comment in reversed(@comments.items())
+      #    if comment.used == ' '
+      #        return true
+      # return false
+    end
+
+    def unprocessed(use = false)
+      while @unused.size > 0
+        first = use ? @unused.pop(0) : @unused[0]
+        # info = inspect.getframeinfo(inspect.stack()[1][0])
+        # xprintf('using', first, @comments[first].value, info.function, info.lineno)
+        yield first, @comments[first]
+        if use
+          @comments[first].set_used
+        end
+      end
+    end
+
+    def assign_pre(token)
+      token_line = token.start_mark.line
+      # info = inspect.getframeinfo(inspect.stack()[1][0])
+      # xprintf('assign_pre', token_line, @unused, info.function, info.lineno)
+      gobbled = false
+      while !@unused.empty? && @unused[0] < token_line
+        gobbled = true
+        first = @unused.pop(0)
+        # xprintf('assign_pre < ', first)
+        @comments[first].set_used()
+        token.add_comment_pre(first)
+      end
+      gobbled
+    end
+
+    def assign_eol(tokens)
+      return unless comment_line = @unused&.first
+
+      return unless @comments[comment_line].instance(EOLComment)
+
+      idx = 1
+      _token = tokens[-idx]
+      while _token.start_mark.line > comment_line || _token.instance_of?( ValueToken)
+        idx += 1
+      end
+      # xprintf('idx1', idx)
+      return if
+        tokens.size > idx &&
+          tokens[-idx].instance_of?(ScalarToken) &&
+          tokens[-(idx + 1)].instance_of?(ScalarToken)
+
+      begin
+        if tokens[-idx].instance(ScalarToken) && tokens[-(idx + 1)].instance_of?(KeyToken)
+          begin
+            eol_idx = @unused.pop(0)
+            @comments[eol_idx].set_used
+            # xprintf('>>>>>a', idx, eol_idx, KEYCMNT)
+            tokens[-idx].add_comment_eol(eol_idx, KEYCMNT)
+          rescue IndexError
+            raise NotImplementedError
           end
-          if comment.nil?
-            if ch " \t".include?(ch)
-              blanks += ch
-            elsif ch == '#'
-              mark = reader.get_mark
-              comment = '#'
-            else
-              # xprintf('breaking on', repr(ch))
+          return
+        end
+      rescue IndexError
+        # xprintf('IndexError1')
+      end
+
+      begin
+        if tokens[-idx].instance_of?(ScalarToken) &&
+          ((_token = tokens[-(idx + 1)]).instance_of?(ValueToken) || _token.instance_of?(BlockEntryToken))
+          begin
+            eol_idx = @unused.pop(0)
+            @comments[eol_idx].set_used()
+            tokens[-idx].add_comment_eol(eol_idx, VALUECMNT)
+          rescue IndexError
+            raise NotImplementedError
+          end
+          return
+        end
+      rescue IndexError
+        # xprintf('IndexError2')
+      end
+
+      # for t in tokens
+      #     xprintf('tt-', t)
+      # xprintf('not implemented EOL', type(tokens[-idx]))
+      # import sys
+
+      exit(0)
+    end
+
+    def assign_post(token)
+      token_line = token.start_mark.line
+      # info = inspect.getframeinfo(inspect.stack()[1][0])
+      # xprintf('assign_post', token_line, @unused, info.function, info.lineno)
+      gobbled = false
+      while !@unused.empty? && @unused[0] < token_line
+        gobbled = true
+        first = @unused.pop(0)
+        # xprintf('assign_post < ', first)
+        @comments[first].set_used()
+        token.add_comment_post(first)
+      end
+      gobbled
+    end
+
+    def str_unprocessed
+      (
+      @comments.items.map { |ind, x| "  #{ind} #{x.info}\n" } if x.used == ' '
+      ).join
+    end
+  end
+
+
+  class RoundTripScannerSC < Scanner  # RoundTripScanner Split Comments
+    def initialize(*arg, **kw)
+      super(*arg, **kw)
+      raise if @loader.nil?
+      # comments isinitialised on .need_more_tokens and persist on
+      # @loader.parsed_comments
+      @comments = nil
+    end
+
+    def get_token
+      # Return the next token.
+      while need_more_tokens
+        fetch_more_tokens
+      end
+      if @tokens.size > 0
+        if (_token = @tokens[0]).instance_of?(BlockEndToken)
+          @comments.assign_post(_token)
+        else
+          @comments.assign_pre(_token)
+        end
+        @tokens_taken += 1
+        @tokens.pop(0)
+      end
+    end
+
+    def need_more_tokens
+      if @comments.nil?
+        @loader.parsed_comments = @comments = ScannedComments.new
+      end
+      return false if @done
+
+      return true if @tokens.empty?
+
+      # The current token may be a potential simple key, so we
+      # need to look further.
+      stale_possible_simple_keys
+      return true if next_possible_simple_key == @tokens_taken
+
+      return true if @tokens.size < 2
+
+      first_token = @tokens[0]
+      return true if first_token.start_mark.line == @tokens[-1].start_mark.line
+
+      # if true
+      #     xprintf('-x--', len(@tokens))
+      #     for t in @tokens
+      #         xprintf(t)
+      #     # xprintf(@comments.last())
+      #     xprintf(@comments.str_unprocessed())  # type: ignore
+      @comments.assign_pre(first_token)
+      @comments.assign_eol(@tokens)
+    end
+
+    def scan_to_next_token
+      if reader.index == 0 && reader.peek == "\uFEFF"
+        reader.forward
+      end
+      start_mark = reader.get_mark
+      # xprintf('current_mark', start_mark.line, start_mark.column)
+      found = false
+      until found
+        while reader.peek == ' '
+          reader.forward
+        end
+        ch = reader.peek
+        if ch == '#'
+          comment_start_mark = reader.get_mark
+          comment = ch
+          reader.forward  # skip the '#'
+          until THE_END.include?(ch)
+            ch = reader.peek
+            if ch == "\0"  # don't gobble the end-of-stream character
+              # but add an explicit newline as "YAML processors should terminate
+              # the stream with an explicit line break
+              # https://yaml.org/spec/1.2/spec.html#id2780069
+              comment += "\n"
               break
             end
-          else
             comment += ch
-          end
-          reader.forward
-          ch = reader.peek
-        end
-      end
-
-      def scan_block_scalar_ignored_line(start_mark)
-        # See the specification for details.
-        prefix = +""
-        comment = nil
-        while reader.peek == ' '
-          prefix += reader.peek
-          reader.forward
-        end
-        if reader.peek == '#'
-          comment = +""
-          mark = reader.get_mark
-          until THE_END.include?(reader.peek)
-            comment += reader.peek
             reader.forward
           end
-          comment += "\n"
+          # we have a comment
+          if start_mark.column == 0
+            @comments.add_full_line_comment(comment, comment_start_mark.column, comment_start_mark.line)
+          else
+            @comments.add_eol_comment(comment, comment_start_mark.column, comment_start_mark.line)
+            comment = ''
+          end
+          # gather any blank lines or full line comments following the comment as well
+          scan_empty_or_full_line_comments
+          @allow_simple_key = true unless flow_level.to_boolean
+          return
+        end
+        if scan_line_break.to_boolean
+          # start_mark = reader.get_mark
+          @allow_simple_key = true unless flow_level.to_boolean
+          scan_empty_or_full_line_comments
+          return nil
         end
         ch = reader.peek
-        until THE_END.include?(reader.peek)
-          raise ScannerError.new(
-            'while scanning a block scalar',
-            start_mark,
-            "expected a comment or a line break, but found #{ch}",
-            reader.get_mark
-            )
+        if ch == "\n"  # empty toplevel lines
+          start_mark = reader.get_mark
+          comment = +""
+          while ch
+            ch = scan_line_break(true)
+            comment += ch
+          end
+          if reader.peek == '#'
+            # empty line followed by indented real comment
+            comment = comment[0...comment.rindex("\n")] + "\n"
+          end
+          _ = reader.get_mark  # gobble end_mark
+          return nil
+        else
+          found = true
         end
-        @comments.add_eol_comment(comment, mark.column, mark.line) unless comment.nil?
-        scan_line_break
-        nil
       end
+      # return nil
+    end
+
+    def scan_empty_or_full_line_comments
+      blmark = reader.get_mark
+      assert blmark.column == 0
+      blanks = +""
+      comment = nil
+      mark = nil
+      ch = reader.peek
+      loop do
+        # nprint('ch', repr(ch), reader.get_mark.column)
+        if "\r\n\u{9b}\u2028\u2029".include?(ch)
+          if reader.prefix(2) == "\r\n"
+            reader.forward(2)
+          else
+            reader.forward
+          end
+          if comment.nil?
+            blanks += "\n"
+            @comments.add_blank_line(blanks, blmark.column, blmark.line)
+          else
+            comment += "\n"
+            @comments.add_full_line_comment(comment, mark.column, mark.line)
+            comment = nil
+          end
+          blanks = +""
+          blmark = reader.get_mark
+          ch = reader.peek
+          next
+        end
+        if comment.nil?
+          if ch " \t".include?(ch)
+            blanks += ch
+          elsif ch == '#'
+            mark = reader.get_mark
+            comment = '#'
+          else
+            # xprintf('breaking on', repr(ch))
+            break
+          end
+        else
+          comment += ch
+        end
+        reader.forward
+        ch = reader.peek
+      end
+    end
+
+    def scan_block_scalar_ignored_line(start_mark)
+      # See the specification for details.
+      prefix = +""
+      comment = nil
+      while reader.peek == ' '
+        prefix += reader.peek
+        reader.forward
+      end
+      if reader.peek == '#'
+        comment = +""
+        mark = reader.get_mark
+        until THE_END.include?(reader.peek)
+          comment += reader.peek
+          reader.forward
+        end
+        comment += "\n"
+      end
+      ch = reader.peek
+      until THE_END.include?(reader.peek)
+        raise ScannerError.new(
+          'while scanning a block scalar',
+          start_mark,
+          "expected a comment or a line break, but found #{ch}",
+          reader.get_mark
+        )
+      end
+      @comments.add_eol_comment(comment, mark.column, mark.line) unless comment.nil?
+      scan_line_break
+      nil
     end
   end
 end

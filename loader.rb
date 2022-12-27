@@ -2,6 +2,8 @@
 
 # frozen_string_literal: true
 
+require 'forwardable'
+
 require_relative './reader'
 require_relative './scanner'
 require_relative './parser'
