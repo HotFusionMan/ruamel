@@ -176,7 +176,7 @@ module SweetStreetYaml
         # Hopefully we never get into this branch, because there seem to be no iterator-type constructors that take two arguments and have node as the second argument, let along tag_suffix as the first argument.
         if constructor[:is_iterator]
           # generator = constructor[:constructor].call(tag_suffix, node) # TODO: NOT SURE WHAT IS HAPPENING IN GENERATOR
-          generator = constructor[:constructor].call(node)
+          generator = __send__(constructor[:constructor], node)
           data = generator.call(tag_suffix, node)
           if @deep_construct
             generator.each { |_dummy| }
@@ -184,11 +184,11 @@ module SweetStreetYaml
             @state_generators.append(generator)
           end
         else
-          data = constructor[:constructor].call(tag_suffix, node)
+          data = __send__(constructor[:constructor], tag_suffix, node)
         end
       else
         if constructor[:is_iterator]
-          generator = constructor[:constructor].call(node)
+          generator = __send__(constructor[:constructor], node)
           data = generator.yield(node)
           if @deep_construct
             generator.each { |_dummy| }
@@ -196,7 +196,7 @@ module SweetStreetYaml
             @state_generators.append(generator)
           end
         else
-          data = constructor[:constructor].call(node)
+          data = __send__(constructor[:constructor], node)
         end
       end
       data
@@ -237,14 +237,14 @@ module SweetStreetYaml
           node.start_mark,
           )
       end
-      total_mapping = @yaml_base_dict_type.call
+      total_mapping = @yaml_base_dict_type.new
       if node.__send__('merge').nil?
         todo = [[node.value, true]]
       else
         todo = [[node.merge, false], [node.value, false]]
       end
       todo.each do |values, check|
-        mapping = @yaml_base_dict_type.call
+        mapping = @yaml_base_dict_type.new
         values.each do |key_node, value_node|
           # keys can be list -> deep
           key = construct_object(key_node, true)
@@ -332,7 +332,6 @@ module SweetStreetYaml
 
 
   class SafeConstructor < BaseConstructor
-    class << self
     def construct_scalar(node)
       if node.instance_of?(MappingNode)
         node.value.each do |key_node, value_node|
@@ -423,7 +422,6 @@ module SweetStreetYaml
     end
 
     alias :construct_yaml_null :construct_scalar
-    end
 
     # YAML 1.2 spec doesn't mention yes/no etc any more, 1.1 does
     BOOL_VALUES = {
@@ -437,7 +435,6 @@ module SweetStreetYaml
       'off' => false
     }.freeze
 
-    class << self
     def construct_yaml_bool(node)
       value = construct_scalar(node)
       BOOL_VALUES[value.downcase]
@@ -685,34 +682,33 @@ module SweetStreetYaml
             node.start_mark
         )
     end
-    end
   end
 
-  SafeConstructor.add_constructor('tag:yaml.org,2002:null', SafeConstructor.method(:construct_yaml_null))
+  SafeConstructor.add_constructor('tag:yaml.org,2002:null', :construct_yaml_null)
 
-  SafeConstructor.add_constructor('tag:yaml.org,2002:bool', SafeConstructor.method(:construct_yaml_bool))
+  SafeConstructor.add_constructor('tag:yaml.org,2002:bool', :construct_yaml_bool)
 
-  SafeConstructor.add_constructor('tag:yaml.org,2002:int', SafeConstructor.method(:construct_yaml_int))
+  SafeConstructor.add_constructor('tag:yaml.org,2002:int', :construct_yaml_int)
 
-  SafeConstructor.add_constructor('tag:yaml.org,2002:float', SafeConstructor.method(:construct_yaml_float))
+  SafeConstructor.add_constructor('tag:yaml.org,2002:float', :construct_yaml_float)
 
-  SafeConstructor.add_constructor('tag:yaml.org,2002:binary', SafeConstructor.method(:construct_yaml_binary))
+  SafeConstructor.add_constructor('tag:yaml.org,2002:binary', :construct_yaml_binary)
 
-  SafeConstructor.add_constructor('tag:yaml.org,2002:timestamp', SafeConstructor.method(:construct_yaml_timestamp))
+  SafeConstructor.add_constructor('tag:yaml.org,2002:timestamp', :construct_yaml_timestamp)
 
-  SafeConstructor.add_constructor('tag:yaml.org,2002:omap', SafeConstructor.method(:construct_yaml_omap), true)
+  SafeConstructor.add_constructor('tag:yaml.org,2002:omap', :construct_yaml_omap, true)
 
-  SafeConstructor.add_constructor('tag:yaml.org,2002:pairs', SafeConstructor.method(:construct_yaml_pairs), true)
+  SafeConstructor.add_constructor('tag:yaml.org,2002:pairs', :construct_yaml_pairs, true)
 
-  SafeConstructor.add_constructor('tag:yaml.org,2002:set', SafeConstructor.method(:construct_yaml_set), true)
+  SafeConstructor.add_constructor('tag:yaml.org,2002:set', :construct_yaml_set, true)
 
-  SafeConstructor.add_constructor('tag:yaml.org,2002:str', SafeConstructor.method(:construct_yaml_str))
+  SafeConstructor.add_constructor('tag:yaml.org,2002:str', :construct_yaml_str)
 
-  SafeConstructor.add_constructor('tag:yaml.org,2002:seq', SafeConstructor.method(:construct_yaml_seq), true)
+  SafeConstructor.add_constructor('tag:yaml.org,2002:seq', :construct_yaml_seq, true)
 
-  SafeConstructor.add_constructor('tag:yaml.org,2002:map', SafeConstructor.method(:construct_yaml_map), true)
+  SafeConstructor.add_constructor('tag:yaml.org,2002:map', :construct_yaml_map, true)
 
-  SafeConstructor.add_constructor('NULL TAG', SafeConstructor.method(:construct_undefined))
+  SafeConstructor.add_constructor('NULL TAG', :construct_undefined)
 
 
 =begin
@@ -936,39 +932,39 @@ module SweetStreetYaml
     #     return construct_python_object_apply(suffix, node, newobj=true)
   end
 
-  Constructor.add_constructor('tag:yaml.org,2002:python/none', Constructor.method(:construct_yaml_null))
+  Constructor.add_constructor('tag:yaml.org,2002:python/none', :construct_yaml_null)
 
-  Constructor.add_constructor('tag:yaml.org,2002:python/bool', Constructor.method(:construct_yaml_bool))
+  Constructor.add_constructor('tag:yaml.org,2002:python/bool', :construct_yaml_bool)
 
-  Constructor.add_constructor('tag:yaml.org,2002:python/str', Constructor.method(:construct_python_str))
+  Constructor.add_constructor('tag:yaml.org,2002:python/str', :construct_python_str)
 
-  Constructor.add_constructor('tag:yaml.org,2002:python/unicode', Constructor.method(:construct_python_unicode))
+  Constructor.add_constructor('tag:yaml.org,2002:python/unicode', :construct_python_unicode)
 
-  Constructor.add_constructor('tag:yaml.org,2002:python/bytes', Constructor.method(:construct_python_bytes))
+  Constructor.add_constructor('tag:yaml.org,2002:python/bytes', :construct_python_bytes)
 
-  Constructor.add_constructor('tag:yaml.org,2002:python/int', Constructor.method(:construct_yaml_int))
+  Constructor.add_constructor('tag:yaml.org,2002:python/int', :construct_yaml_int)
 
-  Constructor.add_constructor('tag:yaml.org,2002:python/long', Constructor.method(:construct_python_long))
+  Constructor.add_constructor('tag:yaml.org,2002:python/long', :construct_python_long)
 
-  Constructor.add_constructor('tag:yaml.org,2002:python/float', Constructor.method(:construct_yaml_float))
+  Constructor.add_constructor('tag:yaml.org,2002:python/float', :construct_yaml_float)
 
-  Constructor.add_constructor('tag:yaml.org,2002:python/complex', Constructor.method(:construct_python_complex))
+  Constructor.add_constructor('tag:yaml.org,2002:python/complex', :construct_python_complex)
 
-  Constructor.add_constructor('tag:yaml.org,2002:python/list', Constructor.method(:construct_yaml_seq), true)
+  Constructor.add_constructor('tag:yaml.org,2002:python/list', :construct_yaml_seq, true)
 
-  Constructor.add_constructor('tag:yaml.org,2002:python/tuple', Constructor.method(:construct_python_tuple))
+  Constructor.add_constructor('tag:yaml.org,2002:python/tuple', :construct_python_tuple)
 
-  Constructor.add_constructor('tag:yaml.org,2002:python/dict', Constructor.method(:construct_yaml_map), true)
+  Constructor.add_constructor('tag:yaml.org,2002:python/dict', :construct_yaml_map, true)
 
-  Constructor.add_multi_constructor('tag:yaml.org,2002:python/name:', Constructor.method(:construct_python_name))
+  Constructor.add_multi_constructor('tag:yaml.org,2002:python/name:', :construct_python_name)
 
-  Constructor.add_multi_constructor('tag:yaml.org,2002:python/module:', Constructor.method(:construct_python_module))
+  Constructor.add_multi_constructor('tag:yaml.org,2002:python/module:', :construct_python_module)
 
-  Constructor.add_multi_constructor('tag:yaml.org,2002:python/object:', Constructor.method(:construct_python_object), true)
+  Constructor.add_multi_constructor('tag:yaml.org,2002:python/object:', :construct_python_object, true)
 
-  Constructor.add_multi_constructor('tag:yaml.org,2002:python/object/apply:', Constructor.method(:construct_python_object_apply))
+  Constructor.add_multi_constructor('tag:yaml.org,2002:python/object/apply:', :construct_python_object_apply)
 
-  Constructor.add_multi_constructor('tag:yaml.org,2002:python/object/new:', Constructor.method(:construct_python_object_new))
+  Constructor.add_multi_constructor('tag:yaml.org,2002:python/object/new:', :construct_python_object_new)
 =end
 
 
@@ -1786,29 +1782,29 @@ module SweetStreetYaml
     end
   end
 
-  RoundTripConstructor.add_constructor('tag:yaml.org,2002:null', RoundTripConstructor.method(:construct_yaml_null))
+  RoundTripConstructor.add_constructor('tag:yaml.org,2002:null', :construct_yaml_null)
 
-  RoundTripConstructor.add_constructor('tag:yaml.org,2002:bool', RoundTripConstructor.method(:construct_yaml_bool))
+  RoundTripConstructor.add_constructor('tag:yaml.org,2002:bool', :construct_yaml_bool)
 
-  RoundTripConstructor.add_constructor('tag:yaml.org,2002:int', RoundTripConstructor.method(:construct_yaml_int))
+  RoundTripConstructor.add_constructor('tag:yaml.org,2002:int', :construct_yaml_int)
 
-  RoundTripConstructor.add_constructor('tag:yaml.org,2002:float', RoundTripConstructor.method(:construct_yaml_float))
+  RoundTripConstructor.add_constructor('tag:yaml.org,2002:float', :construct_yaml_float)
 
-  RoundTripConstructor.add_constructor('tag:yaml.org,2002:binary', RoundTripConstructor.method(:construct_yaml_binary))
+  RoundTripConstructor.add_constructor('tag:yaml.org,2002:binary', :construct_yaml_binary)
 
-  RoundTripConstructor.add_constructor('tag:yaml.org,2002:timestamp', RoundTripConstructor.method(:construct_yaml_timestamp))
+  RoundTripConstructor.add_constructor('tag:yaml.org,2002:timestamp', :construct_yaml_timestamp)
 
-  RoundTripConstructor.add_constructor('tag:yaml.org,2002:omap', RoundTripConstructor.method(:construct_yaml_omap), true)
+  RoundTripConstructor.add_constructor('tag:yaml.org,2002:omap', :construct_yaml_omap, true)
 
-  RoundTripConstructor.add_constructor('tag:yaml.org,2002:pairs', RoundTripConstructor.method(:construct_yaml_pairs), true)
+  RoundTripConstructor.add_constructor('tag:yaml.org,2002:pairs', :construct_yaml_pairs, true)
 
-  RoundTripConstructor.add_constructor('tag:yaml.org,2002:set', RoundTripConstructor.method(:construct_yaml_set), true)
+  RoundTripConstructor.add_constructor('tag:yaml.org,2002:set', :construct_yaml_set, true)
 
-  RoundTripConstructor.add_constructor('tag:yaml.org,2002:str', RoundTripConstructor.method(:construct_yaml_str))
+  RoundTripConstructor.add_constructor('tag:yaml.org,2002:str', :construct_yaml_str)
 
-  RoundTripConstructor.add_constructor('tag:yaml.org,2002:seq', RoundTripConstructor.method(:construct_yaml_seq), true)
+  RoundTripConstructor.add_constructor('tag:yaml.org,2002:seq', :construct_yaml_seq, true)
 
-  RoundTripConstructor.add_constructor('tag:yaml.org,2002:map', RoundTripConstructor.method(:construct_yaml_map), true)
+  RoundTripConstructor.add_constructor('tag:yaml.org,2002:map', :construct_yaml_map, true)
 
-  RoundTripConstructor.add_constructor('NULL TAG', RoundTripConstructor.method(:construct_undefined), true)
+  RoundTripConstructor.add_constructor('NULL TAG', :construct_undefined, true)
 end

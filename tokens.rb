@@ -9,7 +9,7 @@ module SweetStreetYaml
 SHOW_LINES = true
 
   class Token
-    attr_accessor :start_mark, :end_mark, :_comment
+    attr_accessor :start_mark, :end_mark, :comment
 
     def initialize(start_mark, end_mark)
       @start_mark = start_mark
@@ -27,7 +27,7 @@ SHOW_LINES = true
         end
       end
       begin
-        arguments.append('comment: ' + @_comment.to_s)
+        arguments.append('comment: ' + comment.to_s)
       rescue
       end
 
@@ -50,40 +50,35 @@ SHOW_LINES = true
     # new style routines add one comment at a time
 
     # new style
-    def add_comment_pre(comment)
-      if _comment
-        raise unless _comment.size == 3
-        _comment[0] ||= []
+    def add_comment_pre(the_comment)
+      if @comment
+        raise unless @comment.size == 3
+        @comment[0] ||= []
       else
-        _comment = [[], nil, nil]
+        @comment = [[], nil, nil]
       end
-      _comment[0].append(comment)
+      @comment[0].append(the_comment)
     end
 
-    def add_comment_eol(comment, comment_type)
-      if _comment
-
-        raise if _comment[1]
+    def add_comment_eol(the_comment, comment_type)
+      if @comment
+        raise if @comment[1]
       else
-        _comment = [nil, nil, nil]
+        @comment = [nil, nil, nil]
       end
-      _comment[1] ||= []
-      _comment[1] += ([nil] * (comment_type + 1 - comment[1].size))
-      _comment[1][comment_type] = comment
+      @comment[1] ||= []
+      @comment[1] += ([nil] * (comment_type + 1 - the_comment[1].size))
+      @comment[1][comment_type] = the_comment
     end
 
-    def add_comment_post(comment)
-      if _comment
-        raise unless _comment.size == 3
-        _comment[2] ||= []
+    def add_comment_post(the_comment)
+      if @comment
+        raise unless @comment.size == 3
+        @comment[2] ||= []
       else
-        _comment = [nil, nil, []]
+        @comment = [nil, nil, []]
       end
-      _comment[2].append(comment)
-    end
-
-    def comment
-      @_comment
+      @comment[2].append(the_comment)
     end
 
     def move_old_comment(target, empty = false)
@@ -92,17 +87,17 @@ SHOW_LINES = true
         ScalarToken that follows it
         empty is a special for empty values -> comment after key
         "
-      c = comment
+      c = @comment
       return unless c
 
       # don't push beyond last element
       return if target.instance_of?(StreamEndToken) || target.instance_of?(DocumentStartToken)
-      @_comment = nil
+      @comment = nil
       tc = target.comment
       unless tc # target comment, just insert
         # special for empty value in key: value issue 25
         c = [c[0], c[1], nil, nil, c[0]] if empty
-        target._comment = c
+        target.comment = c
         return self
       end
       raise NotImplementedError.new("overlap in comment '#{c}' '#{tc}'") if c[0] && tc[0] || c[1] && tc[1]
@@ -118,9 +113,9 @@ SHOW_LINES = true
            # this goes to first element
            - first element
         "
-      return nil if @_comment.nil? || @_comment[0].nil? # nothing to do
-      ret_val = [@_comment[0], nil]
-      @_comment = nil if @_comment[1].nil?
+      return nil if @comment.nil? || @comment[0].nil? # nothing to do
+      ret_val = [@comment[0], nil]
+      @comment = nil if comment[1].nil?
       ret_val
     end
 
@@ -130,16 +125,16 @@ SHOW_LINES = true
         ScalarToken that follows it
         empty is a special for empty values -> comment after key
         "
-      c = comment
+      c = @comment
       return unless c
       # don't push beyond last element
       return if target.instance_of?(StreamEndToken) || target.instance_of?(DocumentStartToken)
-      @_comment = nil
+      @comment = nil
       tc = target.comment
       unless tc  # target comment, just insert
         # special for empty value in key: value issue 25
         c = [c[0], c[1], c[2]] if empty
-        target._comment = c
+        target.comment = c
         return self
       end
       0.upto(2) { |idx| raise NotImplementedError.new("overlap in comment '#{c}' '#{tc}'") if c[idx] && tc[idx] }
@@ -190,6 +185,7 @@ SHOW_LINES = true
 
 
   class BlockSequenceStartToken < Token
+    attr_accessor :encoding
     @id = '<block sequence start>'
   end
 

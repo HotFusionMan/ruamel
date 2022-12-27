@@ -17,6 +17,7 @@ a separate base
 # from ruamel.yaml.scalarstring import ScalarString
 # from ruamel.yaml.anchor import Anchor
 
+require_relative './anchor'
 require_relative './error'
 require_relative './tokens'
 
@@ -210,7 +211,10 @@ module SweetStreetYaml
 
   class Format
     attr_accessor :_flow_style
-    attrib = FORMAT_ATTRIB
+
+    def self.attrib
+      SweetStreetYaml::FORMAT_ATTRIB
+    end
 
     def initialize
       @_flow_style = nil
@@ -246,6 +250,7 @@ module SweetStreetYaml
       @col = nil
       @data = nil
     end
+    attr_accessor :line, :col, :data
 
     def add_kv_line_col(key, data) # checked
       @data ||= {}
@@ -301,9 +306,8 @@ module SweetStreetYaml
 
   class CommentedBase
     def ca # checked
-      instance_variable_set("@#{Comment.attrib}".to_sym, Comment.new) unless self.__send__(Comment.attrib)
-
-      self.__send__(Comment.attrib)
+      instance_variable_set("@#{Comment.attrib}".to_sym, Comment.new) unless instance_variable_get("@#{Comment.attrib}".to_sym)
+      instance_variable_get("@#{Comment.attrib}".to_sym)
     end
 
     def yaml_end_comment_extend(comment, clear = false) # checked
@@ -397,8 +401,8 @@ module SweetStreetYaml
       "format attribute
 
         set_flow_style()/set_block_style()"
-      instance_variable_set("@#{Format.attrib}".to_sym, Format.new) unless self.__send__(Format.attrib)
-      self.__send__(Format.attrib)
+      instance_variable_set("@#{Format.attrib}".to_sym, Format.new) unless instance_variable_get("@#{Format.attrib}".to_sym)
+      instance_variable_get("@#{Format.attrib}".to_sym)
     end
 
     def yaml_add_eol_comment(comment, key = NoComment, column = nil)
@@ -432,8 +436,8 @@ module SweetStreetYaml
     end
 
     def lc # checked
-      instance_variable_set("@#{LineCol.attrib}".to_sym, LineCol.new) unless self.__send__(LineCol.attrib)
-      self.__send__(LineCol.attrib)
+      instance_variable_set("@#{LineCol.attrib}".to_sym, LineCol.new) unless instance_variable_get("@#{LineCol.attrib}".to_sym)
+      instance_variable_get("@#{LineCol.attrib}".to_sym)
     end
 
     def _yaml_set_line_col(line, col)
@@ -450,8 +454,8 @@ module SweetStreetYaml
     end
 
     def anchor
-      instance_variable_set("@#{Anchor.attrib}".to_sym, Anchor.new) unless self.__send__(Anchor.attrib)
-      self.__send__(Anchor.attrib)
+      instance_variable_set("@#{Anchor.attrib}".to_sym, Anchor.new) unless instance_variable_get("@#{Anchor.attrib}".to_sym)
+      instance_variable_get("@#{Anchor.attrib}".to_sym)
     end
 
     def yaml_anchor
@@ -461,26 +465,29 @@ module SweetStreetYaml
     end
 
     def yaml_set_anchor(value, always_dump = false)
-        anchor.value = value
-        anchor.always_dump = always_dump
+      anchor.value = value
+      anchor.always_dump = always_dump
     end
     
     def tag
-      instance_variable_set("@#{Tag.attrib}".to_sym, Tag.new) unless self.__send__(Tag.attrib)
-      self.__send__(Tag.attrib)
+      instance_variable_set("@#{Tag.attrib}".to_sym, Tag.new) unless instance_variable_get("@#{Tag.attrib}".to_sym)
+      instance_variable_get("@#{Tag.attrib}".to_sym)
     end
 
     def yaml_set_tag(value)
       tag.value = value
     end
 
+    ATTRS = [Comment.attrib, Format.attrib, LineCol.attrib, Anchor.attrib, Tag.attrib, MERGE_ATTRIB].freeze
     def copy_attributes(t, memo = nil)
-      [Comment.attrib, Format.attrib, LineCol.attrib, Anchor.attrib, Tag.attrib, merge_attrib].each do |a|
-        if self.__send__(a)
+      ATTRS.each do |a|
+        attr_name = "@#{a}".to_sym
+        attr_value = instance_variable_get(attr_name)
+        if attr_value
           if memo
-            t.instance_variable_set("@#{a}".to_sym, a.deep_dup)
+            t.instance_variable_set(attr_name, a.deep_dup)
           else
-            t.instance_variable_set("@#{a}".to_sym, self.__send__(a))
+            t.instance_variable_set(attr_name, attr_value)
           end
         end
       end
@@ -501,10 +508,10 @@ module SweetStreetYaml
 
 
   class CommentedSeq < CommentedBase
-    attr_accessor Comment.attrib.to_sym, :_lst
+    attr_accessor Comment.attrib, :_lst
 
     def initialize(*args)
-      @_lst = Array.new(*args)
+      @_lst = Array.new(args)
     end
 
     def [](idx)
@@ -1072,8 +1079,11 @@ module SweetStreetYaml
       end
     end
 
-    def raise_immutable(cls, *args, **kwargs)
-      raise TypeError.new('{} objects are immutable'.format(cls.__name__))
+    def self.raise_immutable(*args, **kwargs)
+      raise TypeError.new("{name} objects are immutable")
+    end
+    def raise_immutable(*args, **kwargs)
+      self.class.raise_immutable(*args, **kwargs)
     end
 
     alias :delete :raise_immutable
