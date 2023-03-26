@@ -34,6 +34,9 @@ require_relative './tokens'
 require_relative './compat'
 
 module SweetStreetYaml
+  class ScannerError < MarkedYAMLError
+  end
+
   class SimpleKey
     # See below simple keys treatment.
     def initialize(token_number, required, index, line, column, mark)
@@ -320,10 +323,10 @@ module SweetStreetYaml
 
       # No? It's an error. Let's produce a nice error message.
       raise ScannerError.new(
-        'while scanning for the next token',
-        nil,
-        "found character #{ch} that cannot start any token",
-        reader.get_mark
+        context: 'while scanning for the next token',
+        context_mark: nil,
+        problem: "found character '#{ch}' that cannot start any token",
+        problem_mark: reader.get_mark
       )
     end
 

@@ -205,7 +205,7 @@ module SweetStreetYaml
 
 
   # to distinguish key from nil
-  def NoComment
+  class NoComment
   end
 
 
@@ -514,6 +514,10 @@ module SweetStreetYaml
       @_lst = Array.new(args)
     end
 
+    def empty?
+      @_lst.empty?
+    end
+
     def [](idx)
       @_lst[idx]
     end
@@ -539,6 +543,10 @@ module SweetStreetYaml
       @_lst.size
     end
     alias :length :size
+
+    def each
+      @_lst.each# { |e| yield e }
+    end
 
     def insert(idx, val)
       "the comments after the insertion have to move forward"

@@ -112,7 +112,7 @@ module SweetStreetYaml
         old_state_generators = @state_generators
         @state_generators = []
         old_state_generators.each do |generator|
-          generator.each { |_dummy| }
+            generator.call(node, resume: true)
         end
       end
       @constructed_objects = {}
@@ -132,7 +132,7 @@ module SweetStreetYaml
         @deep_construct = true
       end
 
-      @recursive_objects[node] = nil
+      @recursive_objects[node] = true
       data = construct_non_recursive_object(node)
 
       @constructed_objects[node] = data
@@ -188,8 +188,8 @@ module SweetStreetYaml
         end
       else
         if constructor[:is_iterator]
-          generator = __send__(constructor[:constructor], node)
-          data = generator.yield(node)
+          generator = method(constructor[:constructor])#, node)
+          data = generator.call(node)
           if @deep_construct
             generator.each { |_dummy| }
           else
@@ -318,15 +318,15 @@ module SweetStreetYaml
       pairs
     end
 
-    def self.add_constructor(tag, constructor, is_iterator = false)
+    def self.add_constructor(tag, constructor_method_name, is_iterator = false)
       @yaml_constructors ||= superclass.instance_variable_get(:@yaml_constructors).dup unless self == BaseConstructor
-      @yaml_constructors[tag] = { :constructor => constructor, :is_iterator => is_iterator }
+      @yaml_constructors[tag] = { :constructor => constructor_method_name, :is_iterator => is_iterator }
     end
 
-    def self.add_multi_constructor(tag_prefix, multi_constructor, is_iterator = false)
+    def self.add_multi_constructor(tag_prefix, multi_constructor_method_name, is_iterator = false)
       # Used only for Python object {de}serialization.
       @yaml_multi_constructors ||= superclass.instance_variable_get(:@yaml_multi_constructors).dup unless self == BaseConstructor
-      @yaml_multi_constructors[tag_prefix] = { :constructor => multi_constructor, :is_iterator => is_iterator }
+      @yaml_multi_constructors[tag_prefix] = { :constructor => multi_constructor_method_name, :is_iterator => is_iterator }
     end
   end
 
@@ -418,7 +418,7 @@ module SweetStreetYaml
       "deep is true when creating an object/mapping recursively,
         in that case want the underlying elements available during construction"
       flatten_mapping(node) if node.instance_of?(MappingNode)
-      BaseConstructor.construct_mapping(node, deep)
+      super
     end
 
     alias :construct_yaml_null :construct_scalar
@@ -599,7 +599,7 @@ module SweetStreetYaml
     end
 
     def construct_yaml_pairs(node)
-      # Note: the same code as `construct_yaml_omap`.
+      # Note: almost exactly the same code as `construct_yaml_omap`.
       pairs = []
       yield pairs.each
       unless node.instance_of?(SequenceNode)
@@ -666,7 +666,7 @@ module SweetStreetYaml
       data = cls.new
       yield data
       if hasattr(data, '__setstate__')
-        state = construct_mapping(node, deep=true)
+        state = construct_mapping(node, true)
         data.__setstate__(state)
       else
         state = construct_mapping(node)
@@ -1533,14 +1533,14 @@ module SweetStreetYaml
       end
     end
 
-    def construct_yaml_seq(node)
-      data = CommentedSeq.new
-      data._yaml_set_line_col(node.start_mark.line, node.start_mark.column)
-      # if node.comment
-      #    data._yaml_add_comment(node.comment)
-      yield data.each
-      data.merge(construct_rt_sequence(node, data))
-      set_collection_style(data, node)
+    def construct_yaml_seq(node, resume: false)
+      unless resume
+        @data = CommentedSeq.new
+        @data._yaml_set_line_col(node.start_mark.line, node.start_mark.column)
+        return @data 
+      end
+      @data.merge(construct_rt_sequence(node, @data))
+      set_collection_style(@data, node)
     end
 
     def construct_yaml_map(node)

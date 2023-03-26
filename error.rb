@@ -67,7 +67,7 @@ module SweetStreetYaml
             end
         end
         snippet = @buffer[start..the_end]
-        caret = '^ (line: {})'.format(@line + 1)
+        caret = "^ (line: #{@line + 1})"
         return (
             ' ' * indent
             + head
@@ -93,12 +93,7 @@ module SweetStreetYaml
 
     def to_s
       snippet = get_snippet
-      where = _F(
-        '  in "{sname!s}", line {sline1:d}, column {scolumn1:d}',
-        sname=name,
-        sline1=line + 1,
-        scolumn1=column + 1,
-        )
+      where = "  in "#{name}", line #{line + 1}, column #{column + 1}",
       where += ":\n" + snippet if snippet
       where
     end
